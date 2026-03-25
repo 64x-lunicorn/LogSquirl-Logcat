@@ -19,6 +19,11 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   # ── Job 1: Reuse the CI build workflow ──────────────────────────────────
@@ -57,19 +62,19 @@ jobs:
           fi
 
       - name: Download Linux artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: plugin-linux-x64
           path: artifacts/linux
 
       - name: Download macOS artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: plugin-macos-arm64
           path: artifacts/macos
 
       - name: Download Windows artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: plugin-windows-x64
           path: artifacts/windows
@@ -109,3 +114,8 @@ jobs:
           files: |
             release/*.zip
             release/checksums.txt
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: release/*.zip
