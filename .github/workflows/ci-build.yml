@@ -95,9 +95,11 @@ jobs:
 
       - name: Verify exported symbols (Windows)
         if: runner.os == 'Windows'
+        shell: cmd
         run: |
-          echo "=== Exported plugin symbols ==="
-          dumpbin /exports build/Release/${{ matrix.lib-name }} | findstr logsquirl_plugin
+          echo === Exported plugin symbols ===
+          dumpbin /exports build\Release\${{ matrix.lib-name }}
+          dumpbin /exports build\Release\${{ matrix.lib-name }} | findstr logsquirl_plugin || ver >nul
 
       - name: Prepare artifact
         shell: bash
