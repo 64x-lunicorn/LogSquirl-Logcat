@@ -1,0 +1,112 @@
+# ============================================================================
+# CI Build — Build and test the LogSquirl Logcat plugin on all platforms
+# ============================================================================
+name: CI Build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            os: ubuntu-24.04
+            qt-arch: linux_gcc_64
+            artifact: plugin-linux-x64
+            lib-name: liblogsquirl_logcat.so
+            cmake-flags: ""
+
+          - name: macOS arm64
+            os: macos-15
+            qt-arch: clangarm64
+            artifact: plugin-macos-arm64
+            lib-name: liblogsquirl_logcat.dylib
+            cmake-flags: ""
+
+          - name: Windows x64
+            os: windows-2025
+            qt-arch: win64_msvc2022_64
+            artifact: plugin-windows-x64
+            lib-name: logsquirl_logcat.dll
+            cmake-flags: ""
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          arch: ${{ matrix.qt-arch }}
+          cache: true
+          modules: ""
+
+      - name: Set up MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v5
+
+      - name: Configure
+        run: >
+          cmake -B build -S .
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DBUILD_TESTS=ON
+          ${{ matrix.cmake-flags }}
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure -C Release
+        env:
+          QT_QPA_PLATFORM: offscreen
+
+      - name: Verify exported symbols (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          echo "=== Exported plugin symbols ==="
+          nm -gU build/${{ matrix.lib-name }} | grep logsquirl_plugin || true
+
+      - name: Verify exported symbols (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          echo "=== Exported plugin symbols ==="
+          dumpbin /exports build/Release/${{ matrix.lib-name }} | findstr logsquirl_plugin
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          mkdir -p staging
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp build/Release/${{ matrix.lib-name }} staging/
+          else
+            cp build/${{ matrix.lib-name }} staging/
+          fi
+          cp plugin.json staging/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: staging/
+          if-no-files-found: error
