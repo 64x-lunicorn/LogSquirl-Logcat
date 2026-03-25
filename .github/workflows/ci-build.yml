@@ -39,7 +39,7 @@ jobs:
 
           - name: macOS arm64
             os: macos-15
-            qt-arch: clangarm64
+            qt-arch: clang_64
             artifact: plugin-macos-arm64
             lib-name: liblogsquirl_logcat.dylib
             cmake-flags: ""
@@ -58,7 +58,7 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: "6.8.3"
+          version: "6.10.3"
           arch: ${{ matrix.qt-arch }}
           cache: true
           modules: ""
