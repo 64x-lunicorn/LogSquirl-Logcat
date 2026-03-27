@@ -98,18 +98,14 @@ jobs:
         shell: cmd
         run: |
           echo === Exported plugin symbols ===
-          dumpbin /exports build\Release\${{ matrix.lib-name }}
-          dumpbin /exports build\Release\${{ matrix.lib-name }} | findstr logsquirl_plugin || ver >nul
+          dumpbin /exports build\${{ matrix.lib-name }}
+          dumpbin /exports build\${{ matrix.lib-name }} | findstr logsquirl_plugin || ver >nul
 
       - name: Prepare artifact
         shell: bash
         run: |
           mkdir -p staging
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            cp build/Release/${{ matrix.lib-name }} staging/
-          else
-            cp build/${{ matrix.lib-name }} staging/
-          fi
+          cp build/${{ matrix.lib-name }} staging/
           cp plugin.json staging/
 
       - name: Upload artifact
