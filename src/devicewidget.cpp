@@ -185,6 +185,115 @@ int DeviceWidget::activeSessionCount() const
     return sessions_.size();
 }
 
+QStringList DeviceWidget::activeSerials() const
+{
+    return sessions_.keys();
+}
+
+void DeviceWidget::rotateSession( const QString& serial )
+{
+    auto* proc = sessions_.value( serial, nullptr );
+    if ( !proc || !proc->isRunning() ) {
+        return;
+    }
+
+    // Prevent old temp dir from being auto-removed so the old tab keeps its data
+    proc->preserveTempFile();
+
+    const auto newPath = proc->rotateLog();
+    if ( newPath.isEmpty() ) {
+        if ( g_state.api && g_state.handle ) {
+            g_state.api->show_notification(
+                g_state.handle,
+                qPrintable( "Failed to rotate log for " + serial ) );
+        }
+        return;
+    }
+
+    // Open the new temp file in a follow-mode tab
+    if ( g_state.api && g_state.handle ) {
+        g_state.api->open_file( g_state.handle, newPath.toUtf8().constData(), 1 );
+        g_state.api->show_notification(
+            g_state.handle,
+            qPrintable( QString( "New session started for %1" ).arg( serial ) ) );
+    }
+}
+
+bool DeviceWidget::startSession( const QString& serial, const QString& savePath )
+{
+    if ( serial.isEmpty() || sessions_.contains( serial ) ) {
+        return false;
+    }
+
+    auto* proc = new AdbProcess( serial, savePath, this );
+
+    connect( proc, &AdbProcess::started, this, [this, serial]() {
+        hostLog( LOGSQUIRL_LOG_INFO,
+                 qPrintable( "Logcat session started for " + serial ) );
+    } );
+
+    connect( proc, &AdbProcess::finished, this, [this, serial]( int ) {
+        onSessionFinished( serial );
+    } );
+
+    connect( proc, &AdbProcess::errorOccurred, this, [this, serial]( const QString& msg ) {
+        onSessionError( serial, msg );
+    } );
+
+    proc->start();
+
+    if ( proc->isRunning() || !proc->tempFilePath().isEmpty() ) {
+        sessions_.insert( serial, proc );
+
+        if ( g_state.api && g_state.handle ) {
+            const auto path = proc->tempFilePath().toUtf8();
+            g_state.api->open_file( g_state.handle, path.constData(), 1 );
+            g_state.api->show_notification(
+                g_state.handle,
+                qPrintable( QString( "Logcat started for %1" ).arg( serial ) ) );
+        }
+
+        refreshDevices();
+        return true;
+    }
+
+    delete proc;
+    return false;
+}
+
+void DeviceWidget::stopSession( const QString& serial )
+{
+    if ( !sessions_.contains( serial ) ) {
+        return;
+    }
+
+    auto* proc = sessions_.take( serial );
+    proc->stop();
+    proc->preserveTempFile();
+
+    if ( g_state.api && g_state.handle ) {
+        g_state.api->show_notification(
+            g_state.handle,
+            qPrintable( QString( "Logcat stopped for %1 (%2 lines)" )
+                            .arg( serial )
+                            .arg( proc->lineCount() ) ) );
+    }
+
+    proc->deleteLater();
+    refreshDevices();
+}
+
+qint64 DeviceWidget::sessionLineCount( const QString& serial ) const
+{
+    auto* proc = sessions_.value( serial, nullptr );
+    return proc ? proc->lineCount() : 0;
+}
+
+bool DeviceWidget::isSessionActive( const QString& serial ) const
+{
+    return sessions_.contains( serial );
+}
+
 // ── Private slots ───────────────────────────────────────────────────────
 
 void DeviceWidget::refreshDevices()

@@ -45,6 +45,7 @@
 
 #include "adbprocess.h"
 #include "devicewidget.h"
+#include "sidebarwidget.h"
 
 #include <QFileDialog>
 #include <QInputDialog>
@@ -136,6 +137,16 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, 
     api->register_menu_action( handle, "Plugins", "Android Logcat\u2026",
                                &showLogcatDialog, nullptr );
 
+    // Create the DeviceWidget early so the sidebar panel can reference it.
+    logcat::g_state.dialog = new logcat::DeviceWidget();
+
+    // Register a sidebar tab for logcat session management
+    logcat::g_state.sidebarWidget
+        = new logcat::SidebarWidget( logcat::g_state.dialog );
+    api->register_sidebar_tab(
+        handle, "Logcat",
+        static_cast<void*>( logcat::g_state.sidebarWidget ) );
+
     api->log_message( handle, LOGSQUIRL_LOG_INFO, "Logcat plugin ready." );
     return 0;
 }
@@ -149,6 +160,14 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, 
 LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void )
 {
     logcat::hostLog( LOGSQUIRL_LOG_INFO, "Logcat plugin shutting down…" );
+
+    if ( logcat::g_state.sidebarWidget ) {
+        logcat::g_state.api->unregister_sidebar_tab(
+            logcat::g_state.handle,
+            static_cast<void*>( logcat::g_state.sidebarWidget ) );
+        delete logcat::g_state.sidebarWidget;
+        logcat::g_state.sidebarWidget = nullptr;
+    }
 
     if ( logcat::g_state.dialog ) {
         logcat::g_state.dialog->stopAll();

@@ -284,6 +284,46 @@ void AdbProcess::preserveTempFile()
     tempDir_.setAutoRemove( false );
 }
 
+QString AdbProcess::rotateLog()
+{
+    if ( !isRunning() ) {
+        return {};
+    }
+
+    // Flush any pending partial line to the old file before rotating
+    if ( !readBuffer_.isEmpty() ) {
+        tempFile_.write( readBuffer_ );
+        tempFile_.write( "\n", 1 );
+        tempFile_.flush();
+        ++lineCount_;
+        readBuffer_.clear();
+    }
+
+    // Close the old temp file (it stays on disk for the old tab)
+    tempFile_.close();
+
+    ++rotationCount_;
+    lineCount_ = 0;
+
+    // Open a new temp file in the same directory with an incremented suffix
+    const auto newPath = tempDir_.path() + "/logcat_" + serial_ + "_"
+                         + QString::number( rotationCount_ ) + ".log";
+    tempFile_.setFileName( newPath );
+    if ( !tempFile_.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
+        hostLog( LOGSQUIRL_LOG_ERROR,
+                 qPrintable( "Failed to open rotated temp file: "
+                             + tempFile_.errorString() ) );
+        return {};
+    }
+
+    hostLog( LOGSQUIRL_LOG_INFO,
+             qPrintable( QString( "Rotated logcat log for %1 (rotation #%2)" )
+                             .arg( serial_ )
+                             .arg( rotationCount_ ) ) );
+
+    return newPath;
+}
+
 bool AdbProcess::isRunning() const
 {
     return process_.state() != QProcess::NotRunning;

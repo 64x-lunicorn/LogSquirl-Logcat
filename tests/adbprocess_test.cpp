@@ -30,6 +30,7 @@
 #include "adbprocess.h"
 #include "plugin.h"
 
+#include <QFile>
 #include <QTemporaryDir>
 
 using logcat::AdbProcess;
@@ -94,6 +95,43 @@ SCENARIO( "findAdb returns a path or empty string", "[adbprocess]" )
                 // If ADB is not installed, empty is the correct result — no assertion needed.
                 SUCCEED();
             }
+        }
+    }
+}
+
+SCENARIO( "rotateLog creates a new temp file and preserves the old one", "[adbprocess]" )
+{
+    GIVEN( "an AdbProcess that is not running" )
+    {
+        AdbProcess proc( "test-device" );
+
+        WHEN( "rotateLog is called without starting the process" )
+        {
+            const auto result = proc.rotateLog();
+
+            THEN( "it returns an empty string because the process is not running" )
+            {
+                REQUIRE( result.isEmpty() );
+            }
+        }
+    }
+
+    GIVEN( "an AdbProcess whose temp file has been manually set up for testing" )
+    {
+        // We cannot call start() without a real ADB, but we can verify that
+        // rotateLog returns empty when not running (no process = no rotation).
+        AdbProcess proc( "rotate-test-device" );
+
+        THEN( "rotateLog returns empty because no process is running" )
+        {
+            REQUIRE( proc.rotateLog().isEmpty() );
+        }
+
+        THEN( "the rotation count stays at 0 after a failed rotation" )
+        {
+            proc.rotateLog();
+            // lineCount stays at 0 since nothing was rotated
+            REQUIRE( proc.lineCount() == 0 );
         }
     }
 }

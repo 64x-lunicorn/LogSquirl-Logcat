@@ -40,6 +40,7 @@
 
 namespace logcat {
 class DeviceWidget;
+class SidebarWidget;
 } // namespace logcat
 
 namespace logcat {
@@ -55,6 +56,7 @@ struct PluginState {
     const LogSquirlHostApi* api = nullptr;  ///< Host API function table.
     void* handle = nullptr;                 ///< Opaque plugin instance handle.
     DeviceWidget* dialog = nullptr;         ///< Logcat session dialog.
+    SidebarWidget* sidebarWidget = nullptr;  ///< Sidebar panel for session control.
     bool initialised = false;               ///< True between init() and shutdown().
 };
 
