@@ -1,6 +1,8 @@
 # logsquirl-logcat — Android Logcat Plugin for LogSquirl
 
 [![CI Build](https://github.com/64x-lunicorn/LogSquirl-Logcat/actions/workflows/ci-build.yml/badge.svg)](https://github.com/64x-lunicorn/LogSquirl-Logcat/actions/workflows/ci-build.yml)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](LICENSE)
+[![Platforms](https://img.shields.io/badge/Platforms-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)]()
 
 A [LogSquirl](https://github.com/64x-lunicorn/LogSquirl) plugin that streams
 Android `logcat` output from ADB-connected devices directly into LogSquirl tabs.
@@ -55,7 +57,7 @@ cmake --build build
 # The shared library is in build/:
 #   macOS:   build/liblogsquirl_logcat.dylib
 #   Linux:   build/liblogsquirl_logcat.so
-#   Windows: build/Release/logsquirl_logcat.dll
+#   Windows: build/logsquirl_logcat.dll
 ```
 
 ### Running Tests
@@ -226,14 +228,6 @@ building your own plugins.
 1. Copy this directory
 2. Rename the library in `CMakeLists.txt`
 3. Update `plugin.json` with your plugin's identity
-4. Implement your own logic in `plugin.cpp`
-
-## License
-
-This plugin is licensed under **GPL-3.0-or-later**.  See [LICENSE](LICENSE).
-
-The LogSquirl Plugin SDK header (`include/logsquirl_plugin_api.h`) is
-licensed under **MIT**, allowing plugins of any license to use it.
 4. Modify `plugin.cpp` entry points
 5. Replace `AdbProcess` + `DeviceWidget` with your own logic
 6. Build and install
