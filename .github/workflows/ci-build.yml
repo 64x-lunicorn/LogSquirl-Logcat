@@ -101,12 +101,77 @@ jobs:
           dumpbin /exports build\${{ matrix.lib-name }}
           dumpbin /exports build\${{ matrix.lib-name }} | findstr logsquirl_plugin || ver >nul
 
+      # ── macOS Code Signing & Notarization ───────────────────────────────
+      - name: Import signing certificate
+        if: runner.os == 'macOS' && github.event_name != 'pull_request'
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.MACOS_P12_FILE }}
+          p12-password: ${{ secrets.MACOS_P12_PASSWORD }}
+
+      - name: Resolve signing identity
+        if: runner.os == 'macOS' && github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          CODESIGN_ID=$(security find-identity -v -p codesigning \
+            | grep "Developer ID Application" | head -1 \
+            | sed 's/.*"\(.*\)".*/\1/' || true)
+          if [ -z "$CODESIGN_ID" ]; then
+            echo "::warning::No Developer ID Application identity found"
+          else
+            echo "Using codesign identity: $CODESIGN_ID"
+          fi
+          echo "CODESIGN_ID=$CODESIGN_ID" >> "$GITHUB_ENV"
+
+      - name: Sign plugin dylib
+        if: runner.os == 'macOS' && github.event_name != 'pull_request' && env.CODESIGN_ID != ''
+        shell: bash
+        run: |
+          codesign --force --options runtime --timestamp \
+            --sign "$CODESIGN_ID" \
+            "build/${{ matrix.lib-name }}"
+          echo "=== Verify signature ==="
+          codesign --verify --strict --verbose=2 "build/${{ matrix.lib-name }}"
+
       - name: Prepare artifact
         shell: bash
         run: |
           mkdir -p staging
           cp build/${{ matrix.lib-name }} staging/
           cp plugin.json staging/
+
+      - name: Notarize plugin
+        if: runner.os == 'macOS' && github.event_name != 'pull_request' && env.CODESIGN_ID != ''
+        shell: bash
+        run: |
+          # Create a temporary ZIP for notarization submission.
+          # Apple records the ticket server-side — the files themselves
+          # are unchanged.  Gatekeeper verifies online.
+          cd staging && zip ../plugin-notarize.zip * && cd ..
+          xcrun notarytool submit --wait \
+            --apple-id "${{ secrets.APPLE_ID }}" \
+            --team-id "${{ secrets.APPLE_TEAM_ID }}" \
+            --password "${{ secrets.APPLE_PASSWORD }}" \
+            plugin-notarize.zip \
+            | tee notary.log
+
+          status=$(grep -i "status:" notary.log | tail -1 | awk '{print $NF}')
+          notary_id=$(awk '$1=="id:"{id=$2} END{print id}' notary.log)
+
+          # Fetch detailed notarization log for diagnostics
+          xcrun notarytool log \
+            --apple-id "${{ secrets.APPLE_ID }}" \
+            --team-id "${{ secrets.APPLE_TEAM_ID }}" \
+            --password "${{ secrets.APPLE_PASSWORD }}" \
+            "$notary_id" notary_log.json || true
+          echo "=== Notarization log ==="
+          cat notary_log.json || true
+
+          if [ "$status" != "Accepted" ]; then
+            echo "::error::Notarization failed with status: $status"
+            exit 1
+          fi
+          rm -f plugin-notarize.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
