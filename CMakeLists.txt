@@ -15,7 +15,7 @@
 cmake_minimum_required(VERSION 3.16)
 
 project(logsquirl_logcat
-    VERSION   0.1.0
+    VERSION   0.2.0
     LANGUAGES CXX
 )
 
@@ -35,6 +35,7 @@ add_library(logsquirl_logcat SHARED
     src/plugin.cpp
     src/adbprocess.cpp
     src/devicewidget.cpp
+    src/sidebarwidget.cpp
 )
 
 # Qt MOC needs to know about our Q_OBJECT classes

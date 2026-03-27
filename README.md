@@ -8,8 +8,9 @@
 
 A [LogSquirl](https://github.com/64x-lunicorn/LogSquirl) plugin that streams
 Android `logcat` output from ADB-connected devices directly into LogSquirl tabs.
-Supports **multiple parallel devices**, optional **save-to-file**, and provides
-a dialog for device selection and session control.
+Supports **multiple parallel devices**, a configurable **log directory** with
+automatic filenames, and provides a **sidebar panel** for device selection and
+session control.
 
 This plugin also serves as a **reference implementation / sample plugin** for
 the LogSquirl Plugin SDK.  Every design decision is documented, and the code
@@ -20,7 +21,11 @@ is heavily commented to help you build your own plugins.
 - **Device Discovery** — Automatic ADB device scanning with one-click refresh
 - **Multi-Device** — Capture logcat from multiple devices simultaneously
 - **Live Tailing** — Each device opens in its own LogSquirl tab with follow mode
-- **Save to File** — Optionally persist logcat output to a `.log` file
+- **Log Directory** — Configurable log save path with automatic filename
+  generation (`YYYY-MM-dd_HHmmss_<serial>.log`); path is persisted across
+  sessions
+- **Sidebar Panel** — Integrated sidebar tab with device dropdown, start/stop,
+  active session list with rotate and stop buttons
 - **ADB Auto-Detection** — Finds `adb` via `ANDROID_HOME`, `ANDROID_SDK_ROOT`,
   system `PATH`, or well-known platform-specific paths; configurable override
   via the plugin settings dialog
@@ -103,9 +108,8 @@ After installing, restart LogSquirl (or re-scan via *Plugins → Manage Plugins�
    "Android Logcat" and click OK.  (On first run, the plugin is
    auto-enabled if no other plugins are configured.)
 
-2. Open the logcat dialog via **Plugins → Android Logcat…**
-
-3. In the dialog:
+2. The **Logcat** sidebar tab appears automatically.  Use the sidebar panel
+   to manage sessions:
 
    - **Device dropdown** — Select a connected ADB device.
    - **Refresh** — Re-scan for devices.
@@ -113,13 +117,18 @@ After installing, restart LogSquirl (or re-scan via *Plugins → Manage Plugins�
      A new tab opens in LogSquirl with live output in follow mode.
    - **Stop** — Stop the capture for the selected device.
      The tab remains open with all captured output preserved.
-   - **Stop All** — Stop all active sessions.
 
-4. **Save to file** — Check "Save to file" and enter/browse a `.log` file
-   path. Output is also written to this file alongside the LogSquirl tab.
+3. **Active Sessions** — Running sessions are listed below the controls.
+   Each session row shows the device name with:
+   - **↻** — Rotate log (close current session, start a new one)
+   - **■** — Stop the session
+
+4. **Log directory** — Set a directory path in the "Log Directory" section.
+   Use the **Browse** button or type a path directly.  Log files are
+   automatically named `YYYY-MM-dd_HHmmss_<serial>.log`.
 
 5. **Multiple devices** — Select another device, click Start again.
-   Each device gets its own tab.
+   Each device gets its own tab and session entry.
 
 6. **Configure ADB path** — *Plugins → Manage Plugins…* → select plugin →
    Configure.  Enter the full path to the `adb` executable (or leave empty
@@ -131,17 +140,21 @@ After installing, restart LogSquirl (or re-scan via *Plugins → Manage Plugins�
 graph TD
     subgraph LogSquirl Host
         H[MainWindow]
+        SB[Sidebar Panel]
     end
 
     subgraph Plugin — C ABI Boundary
         P[plugin.cpp<br/>get_info / init /<br/>shutdown / configure]
-        DW[DeviceWidget<br/>QDialog — session control]
+        SW[SidebarWidget<br/>device selector + session list]
+        DW[DeviceWidget<br/>session management]
         AP1[AdbProcess #1<br/>emulator-5554]
         AP2[AdbProcess #2<br/>R5CR10XXXXX]
     end
 
-    H -- register_menu_action --> P
-    P -- creates --> DW
+    H -- register_sidebar_tab --> P
+    P -- creates --> SW
+    SW -- uses --> DW
+    SW --> SB
     DW -- manages --> AP1
     DW -- manages --> AP2
     AP1 -- writes --> TF1[Temp File #1]
@@ -161,7 +174,8 @@ sequenceDiagram
     participant TF as Temp File
     participant LS as LogSquirl Tab
 
-    User->>DW: Click Start
+    User->>SW: Click Start
+    SW->>DW: startSession(serial)
     DW->>AP: start()
     AP->>ADB: spawn adb -s SERIAL logcat
     AP->>TF: create temp file
@@ -172,7 +186,8 @@ sequenceDiagram
         AP->>TF: write + flush
         LS->>TF: tail/follow reads
     end
-    User->>DW: Click Stop
+    User->>SW: Click Stop
+    SW->>DW: stopSession(serial)
     DW->>AP: preserveTempFile() + stop()
     AP->>ADB: SIGTERM
     Note over LS: Tab stays open with captured output
@@ -184,7 +199,7 @@ sequenceDiagram
 |----------|-----------|
 | **Plugin type = UI** | The DataSource type is limited to 1 stream per plugin. UI type allows managing multiple independent streams. |
 | **open_file() instead of push_line()** | Each device writes to its own temp file. The host opens each file with follow/tail mode → one tab per device. |
-| **register_menu_action()** | Plugin opens a QDialog from the Plugins menu rather than embedding a widget in the status bar. Cleaner separation. |
+| **register_sidebar_tab()** | Plugin registers a sidebar widget that is always visible while the plugin is loaded. The sidebar contains device selection, session controls, and active session list. |
 | **QProcess for ADB** | Cross-platform, integrates with Qt event loop, no need for threading. |
 | **No built-in filtering** | LogSquirl's regex search and highlighters are more powerful than any filter we could build. |
 | **Library name without extension** | `plugin.json` uses `"library": "logsquirl_logcat"` — QLibrary resolves the platform suffix automatically. |
@@ -206,8 +221,10 @@ logsquirl-logcat/
 │   ├── plugin.cpp              # C ABI entry points (get_info, init, shutdown)
 │   ├── adbprocess.h            # ADB discovery + per-device QProcess wrapper
 │   ├── adbprocess.cpp
-│   ├── devicewidget.h          # Qt6 session dialog (QDialog)
-│   └── devicewidget.cpp
+│   ├── devicewidget.h          # Session management (start/stop/rotate)
+│   ├── devicewidget.cpp
+│   ├── sidebarwidget.h         # LogSquirl sidebar tab (device list + controls)
+│   └── sidebarwidget.cpp
 ├── tests/
 │   ├── CMakeLists.txt          # Catch2 test setup
 │   ├── tests_main.cpp          # QApplication + Catch2 runner

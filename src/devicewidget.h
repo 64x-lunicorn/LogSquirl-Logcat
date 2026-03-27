@@ -76,6 +76,46 @@ class DeviceWidget : public QDialog {
     /** Number of currently running logcat sessions. */
     int activeSessionCount() const;
 
+    /** Return the serials of all currently active sessions. */
+    QStringList activeSerials() const;
+
+    /**
+     * Rotate the log for an active session: the old temp file is preserved
+     * (tab stays open), a new temp file is created, and a new tab opens.
+     *
+     * @param serial  Device serial of the session to rotate.
+     */
+    void rotateSession( const QString& serial );
+
+    /**
+     * Start logcat capture for a specific device serial.
+     *
+     * @param serial    Device serial to capture.
+     * @param savePath  Optional path to a .log file for persistent saving.
+     * @return true if the session started successfully, false otherwise.
+     */
+    bool startSession( const QString& serial, const QString& savePath = {} );
+
+    /**
+     * Stop logcat capture for a specific device serial.
+     *
+     * @param serial  Device serial of the session to stop.
+     */
+    void stopSession( const QString& serial );
+
+    /**
+     * Return the current line count for an active session.
+     *
+     * @param serial  Device serial to query.
+     * @return Line count, or 0 if the session is not active.
+     */
+    qint64 sessionLineCount( const QString& serial ) const;
+
+    /**
+     * Check whether a session is currently running for the given serial.
+     */
+    bool isSessionActive( const QString& serial ) const;
+
   private Q_SLOTS:
     /** Re-scan for ADB devices and update the combo box. */
     void refreshDevices();

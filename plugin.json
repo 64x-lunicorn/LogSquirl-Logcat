@@ -1,7 +1,7 @@
 {
     "id": "io.github.logsquirl.logcat",
     "name": "Android Logcat",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "type": "ui",
     "library": "logsquirl_logcat",
     "api_version": 1,
