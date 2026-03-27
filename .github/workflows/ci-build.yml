@@ -103,14 +103,14 @@ jobs:
 
       # ── macOS Code Signing & Notarization ───────────────────────────────
       - name: Import signing certificate
-        if: runner.os == 'macOS' && github.event_name != 'pull_request'
+        if: runner.os == 'macOS' && github.event_name == 'workflow_call'
         uses: apple-actions/import-codesign-certs@v3
         with:
           p12-file-base64: ${{ secrets.MACOS_P12_FILE }}
           p12-password: ${{ secrets.MACOS_P12_PASSWORD }}
 
       - name: Resolve signing identity
-        if: runner.os == 'macOS' && github.event_name != 'pull_request'
+        if: runner.os == 'macOS' && github.event_name == 'workflow_call'
         shell: bash
         run: |
           CODESIGN_ID=$(security find-identity -v -p codesigning \
@@ -124,7 +124,7 @@ jobs:
           echo "CODESIGN_ID=$CODESIGN_ID" >> "$GITHUB_ENV"
 
       - name: Sign plugin dylib
-        if: runner.os == 'macOS' && github.event_name != 'pull_request' && env.CODESIGN_ID != ''
+        if: runner.os == 'macOS' && github.event_name == 'workflow_call' && env.CODESIGN_ID != ''
         shell: bash
         run: |
           codesign --force --options runtime --timestamp \
@@ -141,7 +141,7 @@ jobs:
           cp plugin.json staging/
 
       - name: Notarize plugin
-        if: runner.os == 'macOS' && github.event_name != 'pull_request' && env.CODESIGN_ID != ''
+        if: runner.os == 'macOS' && github.event_name == 'workflow_call' && env.CODESIGN_ID != ''
         shell: bash
         run: |
           # Create a temporary ZIP for notarization submission.
