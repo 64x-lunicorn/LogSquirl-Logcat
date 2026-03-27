@@ -235,6 +235,24 @@ logsquirl-logcat/
     └── DEVELOPER_GUIDE.md      # How to use this as a plugin template
 ```
 
+## Plugin Registry
+
+This plugin is listed in the
+[LogSquirl-Plugins](https://github.com/64x-lunicorn/LogSquirl-Plugins) registry.
+LogSquirl users can install it directly from **Plugins → Browse Plugins…** without
+manual file copying.
+
+When publishing a new release, update the corresponding entries in
+[`plugins.json`](https://github.com/64x-lunicorn/LogSquirl-Plugins/blob/main/plugins.json)
+via pull request — see the
+[Contributing Guide](https://github.com/64x-lunicorn/LogSquirl-Plugins/blob/main/CONTRIBUTING.md).
+
+```mermaid
+flowchart LR
+    LS["LogSquirl"] -- "GET plugins.json" --> PR["LogSquirl-Plugins\n(registry)"]
+    PR -- "download_url" --> R["LogSquirl-Logcat\n(this repo's releases)"]
+```
+
 ## Using This as a Plugin Template
 
 This plugin is designed to be a starting point for your own LogSquirl plugins.
