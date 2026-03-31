@@ -1,0 +1,49 @@
+{
+  "plugin_id": "io.github.logsquirl.logcat",
+  "releases": [
+    {
+      "version": "0.2.0",
+      "api_version": 1,
+      "release_notes": "Add sidebar panel with device list, session management, and log directory browser",
+      "assets": [
+        {
+          "platform": "macos",
+          "download_url": "https://github.com/64x-lunicorn/LogSquirl-Logcat/releases/download/v0.2.0/logsquirl-logcat-0.2.0-macos-arm64.zip",
+          "sha256": ""
+        },
+        {
+          "platform": "linux",
+          "download_url": "https://github.com/64x-lunicorn/LogSquirl-Logcat/releases/download/v0.2.0/logsquirl-logcat-0.2.0-linux-x64.zip",
+          "sha256": ""
+        },
+        {
+          "platform": "windows",
+          "download_url": "https://github.com/64x-lunicorn/LogSquirl-Logcat/releases/download/v0.2.0/logsquirl-logcat-0.2.0-windows-x64.zip",
+          "sha256": ""
+        }
+      ]
+    },
+    {
+      "version": "0.1.0",
+      "api_version": 1,
+      "release_notes": "Initial release — stream logcat output from ADB devices",
+      "assets": [
+        {
+          "platform": "macos",
+          "download_url": "https://github.com/64x-lunicorn/LogSquirl-Logcat/releases/download/v0.1.0/logsquirl-logcat-0.1.0-macos-arm64.zip",
+          "sha256": ""
+        },
+        {
+          "platform": "linux",
+          "download_url": "https://github.com/64x-lunicorn/LogSquirl-Logcat/releases/download/v0.1.0/logsquirl-logcat-0.1.0-linux-x64.zip",
+          "sha256": ""
+        },
+        {
+          "platform": "windows",
+          "download_url": "https://github.com/64x-lunicorn/LogSquirl-Logcat/releases/download/v0.1.0/logsquirl-logcat-0.1.0-windows-x64.zip",
+          "sha256": ""
+        }
+      ]
+    }
+  ]
+}

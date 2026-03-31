@@ -93,6 +93,34 @@ jobs:
           echo "=== Exported plugin symbols ==="
           nm -gU build/${{ matrix.lib-name }} | grep logsquirl_plugin || true
 
+      # ── macOS rpath fix ─────────────────────────────────────────────────
+      # The CI Qt path baked into the dylib does not exist on user machines.
+      # Replace it with @loader_path-relative paths so the plugin resolves
+      # Qt frameworks from the host app's Contents/Frameworks/ directory.
+      - name: Fix macOS rpaths
+        if: runner.os == 'macOS'
+        run: |
+          DYLIB="build/${{ matrix.lib-name }}"
+          echo "=== Current rpaths ==="
+          otool -l "$DYLIB" | grep -A2 LC_RPATH || true
+
+          # Remove the CI-specific Qt rpath (may fail if not present — ignore)
+          for rp in $(otool -l "$DYLIB" | awk '/cmd LC_RPATH/{found=1} found && /path /{print $2; found=0}'); do
+            case "$rp" in
+              /Users/runner/*|/home/runner/*|/opt/hostedtoolcache/*)
+                echo "Removing CI rpath: $rp"
+                install_name_tool -delete_rpath "$rp" "$DYLIB" || true
+                ;;
+            esac
+          done
+
+          # Add rpaths for host app bundle and local (alongside plugin)
+          install_name_tool -add_rpath @loader_path/../../../Frameworks "$DYLIB" 2>/dev/null || true
+          install_name_tool -add_rpath @loader_path "$DYLIB" 2>/dev/null || true
+
+          echo "=== Updated rpaths ==="
+          otool -l "$DYLIB" | grep -A2 LC_RPATH || true
+
       - name: Verify exported symbols (Windows)
         if: runner.os == 'Windows'
         shell: cmd
