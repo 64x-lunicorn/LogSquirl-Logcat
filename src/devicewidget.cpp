@@ -166,13 +166,15 @@ DeviceWidget::DeviceWidget( QWidget* parent )
 
 // ── Public methods ──────────────────────────────────────────────────────
 
-void DeviceWidget::stopAll()
+void DeviceWidget::stopAll( bool cleanupTempFiles )
 {
     const auto serials = sessions_.keys();
     for ( const auto& serial : serials ) {
         if ( auto* proc = sessions_.value( serial ) ) {
             proc->stop();
-            proc->preserveTempFile();
+            if ( !cleanupTempFiles ) {
+                proc->preserveTempFile();
+            }
             proc->deleteLater();
         }
     }
