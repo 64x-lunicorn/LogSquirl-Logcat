@@ -170,7 +170,7 @@ LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void )
     }
 
     if ( logcat::g_state.dialog ) {
-        logcat::g_state.dialog->stopAll();
+        logcat::g_state.dialog->stopAll( true );
         delete logcat::g_state.dialog;
         logcat::g_state.dialog = nullptr;
     }

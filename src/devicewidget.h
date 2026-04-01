@@ -70,8 +70,12 @@ class DeviceWidget : public QDialog {
     explicit DeviceWidget( QWidget* parent = nullptr );
     ~DeviceWidget() override = default;
 
-    /** Stop all active logcat sessions.  Called during plugin shutdown. */
-    void stopAll();
+    /** Stop all active logcat sessions.
+     *  @param cleanupTempFiles  If true, temporary log files are removed
+     *         (used during plugin shutdown).  If false, they are preserved
+     *         so that already-open tabs can still display the data.
+     */
+    void stopAll( bool cleanupTempFiles = false );
 
     /** Number of currently running logcat sessions. */
     int activeSessionCount() const;
