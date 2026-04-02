@@ -7,11 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-04-02
+
 ### Added
 - **Plugin icon** — added `icon` field to `plugin.json` for display in the
   host Plugin Management dialog.
 - **Decentralized registry** — added `releases.json` with per-platform download
   URLs and SHA-256 checksums for all releases.
+- **Temp file cleanup** — temporary log files are removed on shutdown.
+- **Default log directory** — logs are saved to a configurable default directory.
 
 ## [0.2.0] — 2026-03-26
 
