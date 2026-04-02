@@ -70,7 +70,7 @@ void hostLog( int level, const char* message )
 static const LogSquirlPluginInfo kPluginInfo = {
     /* id          */ "io.github.logsquirl.logcat",
     /* name        */ "Android Logcat",
-    /* version     */ "0.2.0",
+    /* version     */ "0.3.0",
     /* description */ "Stream Android logcat from ADB devices into LogSquirl tabs",
     /* author      */ "LogSquirl Contributors",
     /* license     */ "GPL-3.0-or-later",
