@@ -54,10 +54,14 @@ namespace logcat {
  * Manages a single `adb logcat` process for one device.
  *
  * Captures stdout line-by-line and writes each line to:
- *   1. A temporary file inside a QTemporaryDir (always).
- *   2. A user-selected log file (optional, if savePath is non-empty).
+ *   - The user-configured log directory file, when savePath is non-empty.
+ *   - A temporary file inside a QTemporaryDir, when savePath is empty.
  *
- * The temporary file path is what the host opens via open_file().
+ * When a savePath is provided the temporary directory is not used,
+ * avoiding orphaned temp files that fill up disk space.
+ *
+ * The file path returned by tempFilePath() is what the host opens
+ * via open_file().
  */
 class AdbProcess : public QObject {
     Q_OBJECT
@@ -151,12 +155,17 @@ class AdbProcess : public QObject {
     const QString& serial() const { return serial_; }
 
     /**
-     * Absolute path to the temporary log file.
+     * Absolute path to the log file (save path or temp file).
      *
-     * This is the file that will be opened in LogSquirl via
-     * host->open_file().  It is only valid after start() is called.
+     * Returns the user-configured save path when one was provided,
+     * otherwise the temporary file path.  This is the file that will
+     * be opened in LogSquirl via host->open_file().  It is only valid
+     * after start() is called.
      */
     QString tempFilePath() const;
+
+    /** Whether the session writes directly to a user-specified save path. */
+    bool isUsingSavePath() const { return usingSavePath_; }
 
     /** Total number of lines captured so far. */
     qint64 lineCount() const { return lineCount_; }
@@ -191,7 +200,8 @@ class AdbProcess : public QObject {
     QFile saveFile_;
     QByteArray readBuffer_;  ///< Accumulates partial lines from stdout.
     qint64 lineCount_ = 0;
-    int rotationCount_ = 0;  ///< Incremented on each rotateLog() call.
+    int rotationCount_ = 0;   ///< Incremented on each rotateLog() call.
+    bool usingSavePath_ = false; ///< True when writing directly to the log directory.
 };
 
 } // namespace logcat

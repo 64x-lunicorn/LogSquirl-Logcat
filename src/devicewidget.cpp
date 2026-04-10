@@ -440,6 +440,10 @@ void DeviceWidget::onSessionFinished( const QString& serial )
 {
     if ( sessions_.contains( serial ) ) {
         auto* proc = sessions_.take( serial );
+
+        // Preserve the temp file so the LogSquirl tab keeps its content.
+        // When using a save path the file is already persistent.
+        proc->preserveTempFile();
         proc->deleteLater();
 
         hostLog( LOGSQUIRL_LOG_INFO,
