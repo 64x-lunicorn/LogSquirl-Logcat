@@ -1,39 +1,114 @@
-# logsquirl-logcat — Android Logcat Plugin for LogSquirl
+<!-- Allow GitHub's presentation markup and a logo before the main heading. -->
+<!-- markdownlint-configure-file {"MD033": {"allowed_elements": ["div", "img"]}, "MD041": false} -->
 
-[![CI Build](https://github.com/64x-lunicorn/LogSquirl-Logcat/actions/workflows/ci-build.yml/badge.svg)](https://github.com/64x-lunicorn/LogSquirl-Logcat/actions/workflows/ci-build.yml)
-[![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](LICENSE)
-[![Downloads](https://img.shields.io/github/downloads/64x-lunicorn/LogSquirl-Logcat/total)](https://github.com/64x-lunicorn/LogSquirl-Logcat/releases)
-[![Commits since latest release](https://img.shields.io/github/commits-since/64x-lunicorn/LogSquirl-Logcat/latest)](https://github.com/64x-lunicorn/LogSquirl-Logcat/commits/main)
-[![Platforms](https://img.shields.io/badge/Platforms-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey.svg)]()
+<div align="center">
 
-A [LogSquirl](https://github.com/64x-lunicorn/LogSquirl) plugin that streams
-Android `logcat` output from ADB-connected devices directly into LogSquirl tabs.
-Supports **multiple parallel devices**, a configurable **log directory** with
-automatic filenames, and provides a **sidebar panel** for device selection and
-session control.
+<img src="icon.png" alt="Android Logcat plugin icon" width="96">
 
-This plugin also serves as a **reference implementation / sample plugin** for
-the LogSquirl Plugin SDK.  Every design decision is documented, and the code
-is heavily commented to help you build your own plugins.
+# Android Logcat
 
-## Features
+**Every device its own tab.**
 
-- **Device Discovery** — Automatic ADB device scanning with one-click refresh
-- **Multi-Device** — Capture logcat from multiple devices simultaneously
-- **Live Tailing** — Each device opens in its own LogSquirl tab with follow mode
-- **Log Directory** — Configurable log save path with automatic filename
-  generation (`YYYY-MM-dd_HHmmss_<serial>.log`); path is persisted across
-  sessions
-- **Sidebar Panel** — Integrated sidebar tab with device dropdown, start/stop,
-  active session list with rotate and stop buttons
-- **ADB Auto-Detection** — Finds `adb` via `ANDROID_HOME`, `ANDROID_SDK_ROOT`,
-  system `PATH`, or well-known platform-specific paths; configurable override
-  via the plugin settings dialog
-- **Persistent Logs** — Captured output remains visible in LogSquirl after
-  stopping a session
-- **Cross-Platform** — Works on macOS, Linux, and Windows
-- **Use LogSquirl Filters** — No built-in filtering; leverage LogSquirl's
-  powerful regex search and highlighters on the raw logcat output
+**A [LogSquirl](https://github.com/64x-lunicorn/LogSquirl) plugin that streams
+Android `logcat` straight into the log viewer.**
+
+Capture from several ADB devices at once and read the output with the same
+regex search and highlighters you use on any other log.
+
+[![CI Build](https://img.shields.io/github/actions/workflow/status/64x-lunicorn/LogSquirl-Logcat/ci-build.yml?branch=main&label=build&style=flat-square)](https://github.com/64x-lunicorn/LogSquirl-Logcat/actions/workflows/ci-build.yml)
+[![Latest release](https://img.shields.io/github/v/release/64x-lunicorn/LogSquirl-Logcat?style=flat-square&color=f97316)](https://github.com/64x-lunicorn/LogSquirl-Logcat/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/64x-lunicorn/LogSquirl-Logcat/total?style=flat-square)](https://github.com/64x-lunicorn/LogSquirl-Logcat/releases)
+[![Platforms](https://img.shields.io/badge/platforms-macOS_%7C_Linux_%7C_Windows-334155?style=flat-square)](#install)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-3b82f6?style=flat-square)](LICENSE)
+
+[Install](#install) &nbsp;/&nbsp;
+[Usage](#usage) &nbsp;/&nbsp;
+[Build](#build) &nbsp;/&nbsp;
+[Architecture](#architecture) &nbsp;/&nbsp;
+[Changelog](CHANGELOG.md)
+
+</div>
+
+---
+
+## Why this plugin?
+
+`adb logcat` in a terminal scrolls away faster than you can read it, and one
+terminal means one device. This plugin puts every device in its own tab, in the
+viewer where your other logs already are.
+
+| Less setup | More signal |
+| :--- | :--- |
+| **Finds `adb` itself.** Looks in `ANDROID_HOME`, `ANDROID_SDK_ROOT`, `PATH` and the usual platform locations; override it in the settings dialog. | **Every device its own tab.** Start as many as you like — each opens in follow mode and keeps streaming. |
+| **Devices found for you.** Automatic ADB scanning with one-click refresh. | **Nothing lost on stop.** Captured output stays in the tab after the session ends. |
+| **Written to disk.** Configurable log directory, automatic `YYYY-MM-dd_HHmmss_<serial>.log` names, path remembered. | **Filter with the host.** No filter UI of its own — LogSquirl's regex search and highlighters do it better. |
+| **Sessions in the sidebar.** Device dropdown, start/stop, and a live list with rotate and stop per session. | **A worked example.** Heavily commented reference implementation for the Plugin SDK. |
+
+## Install
+
+### From LogSquirl
+
+*Plugins → Browse Plugins…* → **Android Logcat** → **Install**. The archive is
+downloaded, verified against its SHA-256 checksum and loaded — no file copying.
+
+### From a release
+
+Download the archive for your platform from the
+[releases page](https://github.com/64x-lunicorn/LogSquirl-Logcat/releases/latest)
+and unpack it into LogSquirl's plugin directory:
+
+| Platform | Plugin Directory |
+|----------|-----------------|
+| macOS    | `~/Library/Application Support/logsquirl/plugins/io.github.logsquirl.logcat/` |
+| Linux    | `~/.local/share/logsquirl/plugins/io.github.logsquirl.logcat/` |
+| Windows  | `%APPDATA%/logsquirl/plugins/io.github.logsquirl.logcat/` |
+
+### From source
+
+See [Build](#build), then:
+
+```bash
+DEST="$HOME/Library/Application Support/logsquirl/plugins/io.github.logsquirl.logcat"
+mkdir -p "$DEST"
+cp build/liblogsquirl_logcat.dylib "$DEST/"
+cp plugin.json icon.png "$DEST/"
+```
+
+Or `cmake --install build --prefix "$HOME/.local"`.
+
+After installing, restart LogSquirl or re-scan via *Plugins → Manage Plugins…*.
+
+## Usage
+
+1. **Enable the plugin** in *Plugins → Manage Plugins…* — check
+   "Android Logcat" and click OK.  (On first run, the plugin is
+   auto-enabled if no other plugins are configured.)
+
+2. The **Logcat** sidebar tab appears automatically.  Use the sidebar panel
+   to manage sessions:
+
+   - **Device dropdown** — Select a connected ADB device.
+   - **Refresh** — Re-scan for devices.
+   - **Start** — Begin capturing logcat for the selected device.
+     A new tab opens in LogSquirl with live output in follow mode.
+   - **Stop** — Stop the capture for the selected device.
+     The tab remains open with all captured output preserved.
+
+3. **Active Sessions** — Running sessions are listed below the controls.
+   Each session row shows the device name with:
+   - **↻** — Rotate log (close current session, start a new one)
+   - **■** — Stop the session
+
+4. **Log directory** — Set a directory path in the "Log Directory" section.
+   Use the **Browse** button or type a path directly.  Log files are
+   automatically named `YYYY-MM-dd_HHmmss_<serial>.log`.
+
+5. **Multiple devices** — Select another device, click Start again.
+   Each device gets its own tab and session entry.
+
+6. **Configure ADB path** — *Plugins → Manage Plugins…* → select plugin →
+   Configure.  Enter the full path to the `adb` executable (or leave empty
+   for auto-detection).
 
 ## Prerequisites
 
@@ -74,65 +149,6 @@ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON
 cmake --build build
 cd build && ctest --output-on-failure
 ```
-
-## Install
-
-Copy the plugin library **and** `plugin.json` into one of LogSquirl's
-plugin search directories:
-
-| Platform | Plugin Directory |
-|----------|-----------------|
-| macOS    | `~/Library/Application Support/logsquirl/plugins/io.github.logsquirl.logcat/` |
-| Linux    | `~/.local/share/logsquirl/plugins/io.github.logsquirl.logcat/` |
-| Windows  | `%APPDATA%/logsquirl/plugins/io.github.logsquirl.logcat/` |
-
-```bash
-# Example for macOS:
-DEST="$HOME/Library/Application Support/logsquirl/plugins/io.github.logsquirl.logcat"
-mkdir -p "$DEST"
-cp build/liblogsquirl_logcat.dylib "$DEST/"
-cp plugin.json "$DEST/"
-```
-
-Or use `cmake --install`:
-
-```bash
-cmake --install build --prefix "$HOME/.local"
-```
-
-After installing, restart LogSquirl (or re-scan via *Plugins → Manage Plugins…*).
-
-## Usage
-
-1. **Enable the plugin** in *Plugins → Manage Plugins…* — check
-   "Android Logcat" and click OK.  (On first run, the plugin is
-   auto-enabled if no other plugins are configured.)
-
-2. The **Logcat** sidebar tab appears automatically.  Use the sidebar panel
-   to manage sessions:
-
-   - **Device dropdown** — Select a connected ADB device.
-   - **Refresh** — Re-scan for devices.
-   - **Start** — Begin capturing logcat for the selected device.
-     A new tab opens in LogSquirl with live output in follow mode.
-   - **Stop** — Stop the capture for the selected device.
-     The tab remains open with all captured output preserved.
-
-3. **Active Sessions** — Running sessions are listed below the controls.
-   Each session row shows the device name with:
-   - **↻** — Rotate log (close current session, start a new one)
-   - **■** — Stop the session
-
-4. **Log directory** — Set a directory path in the "Log Directory" section.
-   Use the **Browse** button or type a path directly.  Log files are
-   automatically named `YYYY-MM-dd_HHmmss_<serial>.log`.
-
-5. **Multiple devices** — Select another device, click Start again.
-   Each device gets its own tab and session entry.
-
-6. **Configure ADB path** — *Plugins → Manage Plugins…* → select plugin →
-   Configure.  Enter the full path to the `adb` executable (or leave empty
-   for auto-detection).
 
 ## Architecture
 
@@ -238,19 +254,20 @@ logsquirl-logcat/
 ## Plugin Registry
 
 This plugin is listed in the
-[LogSquirl-Plugins](https://github.com/64x-lunicorn/LogSquirl-Plugins) registry.
-LogSquirl users can install it directly from **Plugins → Browse Plugins…** without
-manual file copying.
+[LogSquirl-Plugins](https://github.com/64x-lunicorn/LogSquirl-Plugins) catalog,
+so it installs from **Plugins → Browse Plugins…** with no manual file copying.
 
-When publishing a new release, update the corresponding entries in
-[`plugins.json`](https://github.com/64x-lunicorn/LogSquirl-Plugins/blob/main/plugins.json)
-via pull request — see the
-[Contributing Guide](https://github.com/64x-lunicorn/LogSquirl-Plugins/blob/main/CONTRIBUTING.md).
+The catalog holds **one entry per plugin** and does not change between releases.
+Versions, download URLs and checksums live in this repository's
+[`releases.json`](releases.json) — update that when you publish a release, and
+fill in every `sha256`: an empty checksum silently disables verification in the
+host.
 
 ```mermaid
 flowchart LR
-    LS["LogSquirl"] -- "GET plugins.json" --> PR["LogSquirl-Plugins\n(registry)"]
-    PR -- "download_url" --> R["LogSquirl-Logcat\n(this repo's releases)"]
+    LS["LogSquirl"] -- "GET plugins.json" --> C["LogSquirl-Plugins<br/>(catalog)"]
+    C -- "releases_url" --> RJ["releases.json<br/>(this repo)"]
+    RJ -- "download_url + sha256" --> Z["Android Logcat release ZIP"]
 ```
 
 ## Using This as a Plugin Template
