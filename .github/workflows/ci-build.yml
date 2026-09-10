@@ -167,6 +167,7 @@ jobs:
           mkdir -p staging
           cp build/${{ matrix.lib-name }} staging/
           cp plugin.json staging/
+          cp icon.png staging/
 
       - name: Notarize plugin
         if: runner.os == 'macOS' && github.event_name == 'workflow_call' && env.CODESIGN_ID != ''

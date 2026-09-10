@@ -9,17 +9,17 @@
         {
           "platform": "macos",
           "download_url": "https://github.com/64x-lunicorn/LogSquirl-Logcat/releases/download/v0.3.0/logsquirl-logcat-0.3.0-macos-arm64.zip",
-          "sha256": ""
+          "sha256": "e7607cf497874d9610729e85684edbd3fa0865ceb89a90bf213cd2cdf918118f"
         },
         {
           "platform": "linux",
           "download_url": "https://github.com/64x-lunicorn/LogSquirl-Logcat/releases/download/v0.3.0/logsquirl-logcat-0.3.0-linux-x64.zip",
-          "sha256": ""
+          "sha256": "22e609b98f6fb4d861064c407e8ad400c8efec6fdbae380935bfadb08d9ed0b2"
         },
         {
           "platform": "windows",
           "download_url": "https://github.com/64x-lunicorn/LogSquirl-Logcat/releases/download/v0.3.0/logsquirl-logcat-0.3.0-windows-x64.zip",
-          "sha256": ""
+          "sha256": "be175943a58f85f4724c12531d4a8717d1bf296304423b573c61427ca17b82d3"
         }
       ]
     },
@@ -31,39 +31,39 @@
         {
           "platform": "macos",
           "download_url": "https://github.com/64x-lunicorn/LogSquirl-Logcat/releases/download/v0.2.0/logsquirl-logcat-0.2.0-macos-arm64.zip",
-          "sha256": ""
+          "sha256": "d8339621b3b7ce894ccffa7a5b7d6f778b8baacd1c2a10f8e9b4eb4d33a89347"
         },
         {
           "platform": "linux",
           "download_url": "https://github.com/64x-lunicorn/LogSquirl-Logcat/releases/download/v0.2.0/logsquirl-logcat-0.2.0-linux-x64.zip",
-          "sha256": ""
+          "sha256": "09b60741342eddf98f0b69676443313fdb6f4487bd45fd8fbf690ef6815ee12c"
         },
         {
           "platform": "windows",
           "download_url": "https://github.com/64x-lunicorn/LogSquirl-Logcat/releases/download/v0.2.0/logsquirl-logcat-0.2.0-windows-x64.zip",
-          "sha256": ""
+          "sha256": "2cf238f87907cba4e20b538e898e19e935b311f2c3847281f15e36b477ef8c77"
         }
       ]
     },
     {
-      "version": "0.1.0",
+      "version": "0.1.0-beta.1",
       "api_version": 1,
-      "release_notes": "Initial release — stream logcat output from ADB devices",
+      "release_notes": "Android Logcat Plugin v0.1.0-beta.1",
       "assets": [
         {
           "platform": "macos",
-          "download_url": "https://github.com/64x-lunicorn/LogSquirl-Logcat/releases/download/v0.1.0/logsquirl-logcat-0.1.0-macos-arm64.zip",
-          "sha256": ""
+          "download_url": "https://github.com/64x-lunicorn/LogSquirl-Logcat/releases/download/v0.1.0-beta.1/logsquirl-logcat-0.1.0-beta.1-macos-arm64.zip",
+          "sha256": "88f4122c788b5efe890f8a8e344309ba00e14bb9c3eb09e227b13bd9d6f0f9f6"
         },
         {
           "platform": "linux",
-          "download_url": "https://github.com/64x-lunicorn/LogSquirl-Logcat/releases/download/v0.1.0/logsquirl-logcat-0.1.0-linux-x64.zip",
-          "sha256": ""
+          "download_url": "https://github.com/64x-lunicorn/LogSquirl-Logcat/releases/download/v0.1.0-beta.1/logsquirl-logcat-0.1.0-beta.1-linux-x64.zip",
+          "sha256": "d00a51337ad5461fb28564719f62b42073a8da9b4d713a46e42ff7b8cd7e20e0"
         },
         {
           "platform": "windows",
-          "download_url": "https://github.com/64x-lunicorn/LogSquirl-Logcat/releases/download/v0.1.0/logsquirl-logcat-0.1.0-windows-x64.zip",
-          "sha256": ""
+          "download_url": "https://github.com/64x-lunicorn/LogSquirl-Logcat/releases/download/v0.1.0-beta.1/logsquirl-logcat-0.1.0-beta.1-windows-x64.zip",
+          "sha256": "28e780480d949ca79509202c35c72f14280eabc453ec899bd63457045398b154"
         }
       ]
     }
