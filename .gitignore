@@ -1,4 +1,9 @@
+# Identical in every LogSquirl plugin and managed by LogSquirl-Plugin-CI.
+
+# Build trees
 build/
+build-*/
+cmake-build-*/
 .cache/
 compile_commands.json
 CMakeUserPresets.json
@@ -8,6 +13,10 @@ CMakeUserPresets.json
 *.o
 *.a
 .DS_Store
+
+# CPM / FetchContent caches
+cpm_cache/
+_deps/
 
 # Python / venv (for any test tooling)
 .venv/
