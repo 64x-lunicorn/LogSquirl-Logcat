@@ -140,24 +140,15 @@ DeviceWidget::DeviceWidget( QWidget* parent )
     mainLayout->addStretch();
 
     // ── Connect signals ──────────────────────────────────────────────
-    connect( refreshButton_, &QPushButton::clicked,
-             this, &DeviceWidget::refreshDevices );
-    connect( startButton_, &QPushButton::clicked,
-             this, &DeviceWidget::startCapture );
-    connect( stopButton_, &QPushButton::clicked,
-             this, &DeviceWidget::stopCapture );
-    connect( stopAllButton_, &QPushButton::clicked,
-             this, &DeviceWidget::stopAllCaptures );
-    connect( browseButton_, &QPushButton::clicked,
-             this, &DeviceWidget::browseSavePath );
-    connect( adbConfigButton_, &QPushButton::clicked,
-             this, &DeviceWidget::configureAdbPath );
-    connect( saveCheckBox_, &QCheckBox::toggled,
-             savePathEdit_, &QLineEdit::setEnabled );
-    connect( saveCheckBox_, &QCheckBox::toggled,
-             browseButton_, &QPushButton::setEnabled );
-    connect( deviceCombo_, &QComboBox::currentIndexChanged,
-             this, [this]() { updateUiState(); } );
+    connect( refreshButton_, &QPushButton::clicked, this, &DeviceWidget::refreshDevices );
+    connect( startButton_, &QPushButton::clicked, this, &DeviceWidget::startCapture );
+    connect( stopButton_, &QPushButton::clicked, this, &DeviceWidget::stopCapture );
+    connect( stopAllButton_, &QPushButton::clicked, this, &DeviceWidget::stopAllCaptures );
+    connect( browseButton_, &QPushButton::clicked, this, &DeviceWidget::browseSavePath );
+    connect( adbConfigButton_, &QPushButton::clicked, this, &DeviceWidget::configureAdbPath );
+    connect( saveCheckBox_, &QCheckBox::toggled, savePathEdit_, &QLineEdit::setEnabled );
+    connect( saveCheckBox_, &QCheckBox::toggled, browseButton_, &QPushButton::setEnabled );
+    connect( deviceCombo_, &QComboBox::currentIndexChanged, this, [ this ]() { updateUiState(); } );
 
     // Initial device scan
     refreshDevices();
@@ -205,9 +196,8 @@ void DeviceWidget::rotateSession( const QString& serial )
     const auto newPath = proc->rotateLog();
     if ( newPath.isEmpty() ) {
         if ( g_state.api && g_state.handle ) {
-            g_state.api->show_notification(
-                g_state.handle,
-                qPrintable( "Failed to rotate log for " + serial ) );
+            g_state.api->show_notification( g_state.handle,
+                                            qPrintable( "Failed to rotate log for " + serial ) );
         }
         return;
     }
@@ -216,8 +206,7 @@ void DeviceWidget::rotateSession( const QString& serial )
     if ( g_state.api && g_state.handle ) {
         g_state.api->open_file( g_state.handle, newPath.toUtf8().constData(), 1 );
         g_state.api->show_notification(
-            g_state.handle,
-            qPrintable( QString( "New session started for %1" ).arg( serial ) ) );
+            g_state.handle, qPrintable( QString( "New session started for %1" ).arg( serial ) ) );
     }
 }
 
@@ -229,18 +218,15 @@ bool DeviceWidget::startSession( const QString& serial, const QString& savePath 
 
     auto* proc = new AdbProcess( serial, savePath, this );
 
-    connect( proc, &AdbProcess::started, this, [this, serial]() {
-        hostLog( LOGSQUIRL_LOG_INFO,
-                 qPrintable( "Logcat session started for " + serial ) );
+    connect( proc, &AdbProcess::started, this, [ this, serial ]() {
+        hostLog( LOGSQUIRL_LOG_INFO, qPrintable( "Logcat session started for " + serial ) );
     } );
 
-    connect( proc, &AdbProcess::finished, this, [this, serial]( int ) {
-        onSessionFinished( serial );
-    } );
+    connect( proc, &AdbProcess::finished, this,
+             [ this, serial ]( int ) { onSessionFinished( serial ); } );
 
-    connect( proc, &AdbProcess::errorOccurred, this, [this, serial]( const QString& msg ) {
-        onSessionError( serial, msg );
-    } );
+    connect( proc, &AdbProcess::errorOccurred, this,
+             [ this, serial ]( const QString& msg ) { onSessionError( serial, msg ); } );
 
     proc->start();
 
@@ -251,8 +237,7 @@ bool DeviceWidget::startSession( const QString& serial, const QString& savePath 
             const auto path = proc->tempFilePath().toUtf8();
             g_state.api->open_file( g_state.handle, path.constData(), 1 );
             g_state.api->show_notification(
-                g_state.handle,
-                qPrintable( QString( "Logcat started for %1" ).arg( serial ) ) );
+                g_state.handle, qPrintable( QString( "Logcat started for %1" ).arg( serial ) ) );
         }
 
         refreshDevices();
@@ -274,11 +259,10 @@ void DeviceWidget::stopSession( const QString& serial )
     proc->preserveTempFile();
 
     if ( g_state.api && g_state.handle ) {
-        g_state.api->show_notification(
-            g_state.handle,
-            qPrintable( QString( "Logcat stopped for %1 (%2 lines)" )
-                            .arg( serial )
-                            .arg( proc->lineCount() ) ) );
+        g_state.api->show_notification( g_state.handle,
+                                        qPrintable( QString( "Logcat stopped for %1 (%2 lines)" )
+                                                        .arg( serial )
+                                                        .arg( proc->lineCount() ) ) );
     }
 
     proc->deleteLater();
@@ -339,8 +323,7 @@ void DeviceWidget::startCapture()
 
     // Don't start twice for the same device
     if ( sessions_.contains( serial ) ) {
-        hostLog( LOGSQUIRL_LOG_WARNING,
-                 qPrintable( "Logcat already running for " + serial ) );
+        hostLog( LOGSQUIRL_LOG_WARNING, qPrintable( "Logcat already running for " + serial ) );
         return;
     }
 
@@ -352,18 +335,15 @@ void DeviceWidget::startCapture()
     // Create and start the ADB process
     auto* proc = new AdbProcess( serial, savePath, this );
 
-    connect( proc, &AdbProcess::started, this, [this, serial]() {
-        hostLog( LOGSQUIRL_LOG_INFO,
-                 qPrintable( "Logcat session started for " + serial ) );
+    connect( proc, &AdbProcess::started, this, [ this, serial ]() {
+        hostLog( LOGSQUIRL_LOG_INFO, qPrintable( "Logcat session started for " + serial ) );
     } );
 
-    connect( proc, &AdbProcess::finished, this, [this, serial]( int ) {
-        onSessionFinished( serial );
-    } );
+    connect( proc, &AdbProcess::finished, this,
+             [ this, serial ]( int ) { onSessionFinished( serial ); } );
 
-    connect( proc, &AdbProcess::errorOccurred, this, [this, serial]( const QString& msg ) {
-        onSessionError( serial, msg );
-    } );
+    connect( proc, &AdbProcess::errorOccurred, this,
+             [ this, serial ]( const QString& msg ) { onSessionError( serial, msg ); } );
 
     proc->start();
 
@@ -379,8 +359,7 @@ void DeviceWidget::startCapture()
         // Notify via host notification
         if ( g_state.api && g_state.handle ) {
             g_state.api->show_notification(
-                g_state.handle,
-                qPrintable( QString( "Logcat started for %1" ).arg( serial ) ) );
+                g_state.handle, qPrintable( QString( "Logcat started for %1" ).arg( serial ) ) );
         }
     }
     else {
@@ -404,11 +383,10 @@ void DeviceWidget::stopCapture()
     proc->deleteLater();
 
     if ( g_state.api && g_state.handle ) {
-        g_state.api->show_notification(
-            g_state.handle,
-            qPrintable( QString( "Logcat stopped for %1 (%2 lines)" )
-                            .arg( serial )
-                            .arg( proc->lineCount() ) ) );
+        g_state.api->show_notification( g_state.handle,
+                                        qPrintable( QString( "Logcat stopped for %1 (%2 lines)" )
+                                                        .arg( serial )
+                                                        .arg( proc->lineCount() ) ) );
     }
 
     refreshDevices();
@@ -427,9 +405,9 @@ void DeviceWidget::stopAllCaptures()
 
 void DeviceWidget::browseSavePath()
 {
-    const auto path = QFileDialog::getSaveFileName(
-        this, "Save logcat output", savePathEdit_->text(),
-        "Log files (*.log *.txt);;All files (*)" );
+    const auto path
+        = QFileDialog::getSaveFileName( this, "Save logcat output", savePathEdit_->text(),
+                                        "Log files (*.log *.txt);;All files (*)" );
 
     if ( !path.isEmpty() ) {
         savePathEdit_->setText( path );
@@ -458,8 +436,8 @@ void DeviceWidget::onSessionError( const QString& serial, const QString& message
     hostLog( LOGSQUIRL_LOG_ERROR, qPrintable( serial + ": " + message ) );
 
     if ( g_state.api && g_state.handle ) {
-        g_state.api->show_notification(
-            g_state.handle, qPrintable( "Logcat error (" + serial + "): " + message ) );
+        g_state.api->show_notification( g_state.handle,
+                                        qPrintable( "Logcat error (" + serial + "): " + message ) );
     }
 }
 
@@ -481,8 +459,7 @@ void DeviceWidget::updateUiState()
         statusLabel_->setText( "" );
     }
     else {
-        statusLabel_->setText(
-            QString( "%1 active session(s)" ).arg( activeCount ) );
+        statusLabel_->setText( QString( "%1 active session(s)" ).arg( activeCount ) );
     }
 
     // Show the current ADB path
@@ -497,24 +474,21 @@ void DeviceWidget::configureAdbPath()
     const auto currentPath = settings.value( "adb/path", "" ).toString();
     const auto detected = AdbProcess::findAdb();
 
-    const auto prompt
-        = QString( "ADB executable path:\n\n"
-                   "Detected: %1\nCurrent override: %2\n\n"
-                   "Leave empty to use auto-detection." )
-              .arg( detected.isEmpty() ? "(not found)" : detected,
-                    currentPath.isEmpty() ? "(none)" : currentPath );
+    const auto prompt = QString( "ADB executable path:\n\n"
+                                 "Detected: %1\nCurrent override: %2\n\n"
+                                 "Leave empty to use auto-detection." )
+                            .arg( detected.isEmpty() ? "(not found)" : detected,
+                                  currentPath.isEmpty() ? "(none)" : currentPath );
 
     bool ok = false;
-    const auto newPath
-        = QInputDialog::getText( this, "Configure ADB Path", prompt,
-                                 QLineEdit::Normal, currentPath, &ok );
+    const auto newPath = QInputDialog::getText( this, "Configure ADB Path", prompt,
+                                                QLineEdit::Normal, currentPath, &ok );
 
     if ( ok ) {
         settings.setValue( "adb/path", newPath );
-        hostLog( LOGSQUIRL_LOG_INFO,
-                 newPath.isEmpty()
-                     ? "ADB path override cleared — using auto-detection."
-                     : qPrintable( "ADB path set to: " + newPath ) );
+        hostLog( LOGSQUIRL_LOG_INFO, newPath.isEmpty()
+                                         ? "ADB path override cleared — using auto-detection."
+                                         : qPrintable( "ADB path set to: " + newPath ) );
         refreshDevices();
     }
 }

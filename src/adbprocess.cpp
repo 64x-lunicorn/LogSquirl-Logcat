@@ -63,12 +63,10 @@ AdbProcess::AdbProcess( const QString& serial, const QString& savePath, QObject*
     , savePath_( savePath )
 {
     // Connect QProcess signals to our slots
-    connect( &process_, &QProcess::readyReadStandardOutput,
-             this, &AdbProcess::onReadyRead );
-    connect( &process_, QOverload<int, QProcess::ExitStatus>::of( &QProcess::finished ),
-             this, &AdbProcess::onFinished );
-    connect( &process_, &QProcess::errorOccurred,
-             this, &AdbProcess::onErrorOccurred );
+    connect( &process_, &QProcess::readyReadStandardOutput, this, &AdbProcess::onReadyRead );
+    connect( &process_, QOverload<int, QProcess::ExitStatus>::of( &QProcess::finished ), this,
+             &AdbProcess::onFinished );
+    connect( &process_, &QProcess::errorOccurred, this, &AdbProcess::onErrorOccurred );
 }
 
 AdbProcess::~AdbProcess()
@@ -321,29 +319,25 @@ QString AdbProcess::rotateLog()
     QString newPath;
     if ( usingSavePath_ ) {
         const auto dir = QFileInfo( savePath_ ).absolutePath();
-        const auto timestamp
-            = QDateTime::currentDateTime().toString( "yyyy-MM-dd_HHmmss" );
+        const auto timestamp = QDateTime::currentDateTime().toString( "yyyy-MM-dd_HHmmss" );
         auto safeName = serial_;
         safeName.replace( QRegularExpression( "[^a-zA-Z0-9._-]" ), "_" );
-        newPath = QDir( dir ).filePath(
-            QString( "%1_%2.log" ).arg( timestamp, safeName ) );
+        newPath = QDir( dir ).filePath( QString( "%1_%2.log" ).arg( timestamp, safeName ) );
     }
     else {
-        newPath = tempDir_.path() + "/logcat_" + serial_ + "_"
-                  + QString::number( rotationCount_ ) + ".log";
+        newPath = tempDir_.path() + "/logcat_" + serial_ + "_" + QString::number( rotationCount_ )
+                  + ".log";
     }
     tempFile_.setFileName( newPath );
     if ( !tempFile_.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
         hostLog( LOGSQUIRL_LOG_ERROR,
-                 qPrintable( "Failed to open rotated temp file: "
-                             + tempFile_.errorString() ) );
+                 qPrintable( "Failed to open rotated temp file: " + tempFile_.errorString() ) );
         return {};
     }
 
-    hostLog( LOGSQUIRL_LOG_INFO,
-             qPrintable( QString( "Rotated logcat log for %1 (rotation #%2)" )
-                             .arg( serial_ )
-                             .arg( rotationCount_ ) ) );
+    hostLog( LOGSQUIRL_LOG_INFO, qPrintable( QString( "Rotated logcat log for %1 (rotation #%2)" )
+                                                 .arg( serial_ )
+                                                 .arg( rotationCount_ ) ) );
 
     return newPath;
 }

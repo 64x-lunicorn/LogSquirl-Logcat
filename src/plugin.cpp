@@ -134,18 +134,16 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, 
 
     // Add "Android Logcat" to the Plugins menu.  When clicked it opens a
     // non-modal dialog for device selection and session management.
-    api->register_menu_action( handle, "Plugins", "Android Logcat\u2026",
-                               &showLogcatDialog, nullptr );
+    api->register_menu_action( handle, "Plugins", "Android Logcat\u2026", &showLogcatDialog,
+                               nullptr );
 
     // Create the DeviceWidget early so the sidebar panel can reference it.
     logcat::g_state.dialog = new logcat::DeviceWidget();
 
     // Register a sidebar tab for logcat session management
-    logcat::g_state.sidebarWidget
-        = new logcat::SidebarWidget( logcat::g_state.dialog );
-    api->register_sidebar_tab(
-        handle, "Logcat",
-        static_cast<void*>( logcat::g_state.sidebarWidget ) );
+    logcat::g_state.sidebarWidget = new logcat::SidebarWidget( logcat::g_state.dialog );
+    api->register_sidebar_tab( handle, "Logcat",
+                               static_cast<void*>( logcat::g_state.sidebarWidget ) );
 
     api->log_message( handle, LOGSQUIRL_LOG_INFO, "Logcat plugin ready." );
     return 0;
@@ -163,8 +161,7 @@ LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void )
 
     if ( logcat::g_state.sidebarWidget ) {
         logcat::g_state.api->unregister_sidebar_tab(
-            logcat::g_state.handle,
-            static_cast<void*>( logcat::g_state.sidebarWidget ) );
+            logcat::g_state.handle, static_cast<void*>( logcat::g_state.sidebarWidget ) );
         delete logcat::g_state.sidebarWidget;
         logcat::g_state.sidebarWidget = nullptr;
     }
@@ -198,24 +195,21 @@ LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_configure( void* parent_widget )
     const auto currentPath = settings.value( "adb/path", "" ).toString();
 
     const auto detected = logcat::AdbProcess::findAdb();
-    const auto prompt
-        = QString( "ADB executable path:\n\n"
-                   "Detected: %1\nCurrent override: %2\n\n"
-                   "Leave empty to use auto-detection." )
-              .arg( detected.isEmpty() ? "(not found)" : detected,
-                    currentPath.isEmpty() ? "(none)" : currentPath );
+    const auto prompt = QString( "ADB executable path:\n\n"
+                                 "Detected: %1\nCurrent override: %2\n\n"
+                                 "Leave empty to use auto-detection." )
+                            .arg( detected.isEmpty() ? "(not found)" : detected,
+                                  currentPath.isEmpty() ? "(none)" : currentPath );
 
     bool ok = false;
-    const auto newPath
-        = QInputDialog::getText( parent, "Configure ADB Path", prompt,
-                                 QLineEdit::Normal, currentPath, &ok );
+    const auto newPath = QInputDialog::getText( parent, "Configure ADB Path", prompt,
+                                                QLineEdit::Normal, currentPath, &ok );
 
     if ( ok ) {
         settings.setValue( "adb/path", newPath );
         logcat::hostLog( LOGSQUIRL_LOG_INFO,
-                         newPath.isEmpty()
-                             ? "ADB path override cleared — using auto-detection."
-                             : qPrintable( "ADB path set to: " + newPath ) );
+                         newPath.isEmpty() ? "ADB path override cleared — using auto-detection."
+                                           : qPrintable( "ADB path set to: " + newPath ) );
     }
 }
 

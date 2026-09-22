@@ -62,7 +62,7 @@ class DeviceWidget;
 class SidebarWidget : public QWidget {
     Q_OBJECT
 
-  public:
+public:
     /**
      * Construct the sidebar panel.
      *
@@ -70,10 +70,9 @@ class SidebarWidget : public QWidget {
      *                      Must outlive this widget.
      * @param parent        QWidget parent.
      */
-    explicit SidebarWidget( DeviceWidget* deviceWidget,
-                            QWidget* parent = nullptr );
+    explicit SidebarWidget( DeviceWidget* deviceWidget, QWidget* parent = nullptr );
 
-  private Q_SLOTS:
+private Q_SLOTS:
     /** Re-scan for ADB devices and update the combo box. */
     void refreshDevices();
 
@@ -89,7 +88,7 @@ class SidebarWidget : public QWidget {
     /** Periodic refresh of the active-sessions list (line counts). */
     void refreshSessionList();
 
-  private:
+private:
     /** Build or rebuild the sessions list widget contents. */
     void rebuildSessionList();
 

@@ -66,7 +66,7 @@ namespace logcat {
 class AdbProcess : public QObject {
     Q_OBJECT
 
-  public:
+public:
     /**
      * Construct a logcat session for one device.
      *
@@ -75,8 +75,7 @@ class AdbProcess : public QObject {
      *                  Pass an empty string to disable saving.
      * @param parent    QObject parent for memory management.
      */
-    explicit AdbProcess( const QString& serial,
-                         const QString& savePath = {},
+    explicit AdbProcess( const QString& serial, const QString& savePath = {},
                          QObject* parent = nullptr );
     ~AdbProcess() override;
 
@@ -152,7 +151,10 @@ class AdbProcess : public QObject {
     bool isRunning() const;
 
     /** The device serial this session is attached to. */
-    const QString& serial() const { return serial_; }
+    const QString& serial() const
+    {
+        return serial_;
+    }
 
     /**
      * Absolute path to the log file (save path or temp file).
@@ -165,12 +167,18 @@ class AdbProcess : public QObject {
     QString tempFilePath() const;
 
     /** Whether the session writes directly to a user-specified save path. */
-    bool isUsingSavePath() const { return usingSavePath_; }
+    bool isUsingSavePath() const
+    {
+        return usingSavePath_;
+    }
 
     /** Total number of lines captured so far. */
-    qint64 lineCount() const { return lineCount_; }
+    qint64 lineCount() const
+    {
+        return lineCount_;
+    }
 
-  Q_SIGNALS:
+Q_SIGNALS:
     /** Emitted when the logcat process has started successfully. */
     void started();
 
@@ -180,7 +188,7 @@ class AdbProcess : public QObject {
     /** Emitted when an error occurs (ADB not found, process crash, …). */
     void errorOccurred( const QString& message );
 
-  private Q_SLOTS:
+private Q_SLOTS:
     /** Handle new data available on stdout. */
     void onReadyRead();
 
@@ -190,7 +198,7 @@ class AdbProcess : public QObject {
     /** Handle process error. */
     void onErrorOccurred( QProcess::ProcessError error );
 
-  private:
+private:
     QString serial_;
     QString savePath_;
 
@@ -198,9 +206,9 @@ class AdbProcess : public QObject {
     QTemporaryDir tempDir_;
     QFile tempFile_;
     QFile saveFile_;
-    QByteArray readBuffer_;  ///< Accumulates partial lines from stdout.
+    QByteArray readBuffer_; ///< Accumulates partial lines from stdout.
     qint64 lineCount_ = 0;
-    int rotationCount_ = 0;   ///< Incremented on each rotateLog() call.
+    int rotationCount_ = 0;      ///< Incremented on each rotateLog() call.
     bool usingSavePath_ = false; ///< True when writing directly to the log directory.
 };
 

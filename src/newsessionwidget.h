@@ -44,14 +44,14 @@ namespace logcat {
 class NewSessionWidget : public QWidget {
     Q_OBJECT
 
-  public:
+public:
     explicit NewSessionWidget( QWidget* parent = nullptr );
 
-  private Q_SLOTS:
+private Q_SLOTS:
     /** Rebuild the dropdown menu with current active sessions. */
     void updateMenu();
 
-  private:
+private:
     QToolButton* button_ = nullptr;
     QMenu* menu_ = nullptr;
 };
