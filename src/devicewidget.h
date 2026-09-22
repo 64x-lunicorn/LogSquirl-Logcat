@@ -66,7 +66,7 @@ namespace logcat {
 class DeviceWidget : public QDialog {
     Q_OBJECT
 
-  public:
+public:
     explicit DeviceWidget( QWidget* parent = nullptr );
     ~DeviceWidget() override = default;
 
@@ -120,7 +120,7 @@ class DeviceWidget : public QDialog {
      */
     bool isSessionActive( const QString& serial ) const;
 
-  private Q_SLOTS:
+private Q_SLOTS:
     /** Re-scan for ADB devices and update the combo box. */
     void refreshDevices();
 
@@ -145,7 +145,7 @@ class DeviceWidget : public QDialog {
     /** Handle a logcat session error. */
     void onSessionError( const QString& serial, const QString& message );
 
-  private:
+private:
     /** Update UI state (button enable/disable, status label, ADB path). */
     void updateUiState();
 

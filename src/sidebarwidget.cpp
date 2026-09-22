@@ -94,9 +94,8 @@ SidebarWidget::SidebarWidget( DeviceWidget* deviceWidget, QWidget* parent )
 
     logDirEdit_ = new QLineEdit( this );
     logDirEdit_->setPlaceholderText( "(logs saved to temp directory)" );
-    logDirEdit_->setToolTip(
-        "Directory where log files are saved.\n"
-        "Files are named: YYYY-MM-dd_HHmmss_<device>.log" );
+    logDirEdit_->setToolTip( "Directory where log files are saved.\n"
+                             "Files are named: YYYY-MM-dd_HHmmss_<device>.log" );
     logDirLayout->addWidget( logDirEdit_ );
 
     logDirBrowseButton_ = new QPushButton( "…", this );
@@ -130,32 +129,25 @@ SidebarWidget::SidebarWidget( DeviceWidget* deviceWidget, QWidget* parent )
     mainLayout->addStretch();
 
     // ── Connections ──────────────────────────────────────────────────
-    connect( refreshButton_, &QPushButton::clicked,
-             this, &SidebarWidget::refreshDevices );
-    connect( startButton_, &QPushButton::clicked,
-             this, &SidebarWidget::startCapture );
-    connect( stopButton_, &QPushButton::clicked,
-             this, &SidebarWidget::stopSelectedCapture );
-    connect( stopAllButton_, &QPushButton::clicked,
-             this, &SidebarWidget::stopAllCaptures );
-    connect( logDirBrowseButton_, &QPushButton::clicked, this, [this]() {
-        const auto dir = QFileDialog::getExistingDirectory(
-            this, "Select Log Directory", logDirEdit_->text() );
+    connect( refreshButton_, &QPushButton::clicked, this, &SidebarWidget::refreshDevices );
+    connect( startButton_, &QPushButton::clicked, this, &SidebarWidget::startCapture );
+    connect( stopButton_, &QPushButton::clicked, this, &SidebarWidget::stopSelectedCapture );
+    connect( stopAllButton_, &QPushButton::clicked, this, &SidebarWidget::stopAllCaptures );
+    connect( logDirBrowseButton_, &QPushButton::clicked, this, [ this ]() {
+        const auto dir = QFileDialog::getExistingDirectory( this, "Select Log Directory",
+                                                            logDirEdit_->text() );
         if ( !dir.isEmpty() ) {
             logDirEdit_->setText( dir );
             saveLogDir();
         }
     } );
-    connect( logDirEdit_, &QLineEdit::editingFinished,
-             this, &SidebarWidget::saveLogDir );
-    connect( deviceCombo_, &QComboBox::currentIndexChanged,
-             this, [this]() { updateUiState(); } );
+    connect( logDirEdit_, &QLineEdit::editingFinished, this, &SidebarWidget::saveLogDir );
+    connect( deviceCombo_, &QComboBox::currentIndexChanged, this, [ this ]() { updateUiState(); } );
 
     // Periodic refresh of line counts in the session list (every 1 second)
     refreshTimer_ = new QTimer( this );
     refreshTimer_->setInterval( 1000 );
-    connect( refreshTimer_, &QTimer::timeout,
-             this, &SidebarWidget::refreshSessionList );
+    connect( refreshTimer_, &QTimer::timeout, this, &SidebarWidget::refreshSessionList );
     refreshTimer_->start();
 
     // Initial populate
@@ -275,17 +267,15 @@ void SidebarWidget::rebuildSessionList()
         stopBtn->setToolTip( "Stop this session" );
         rowLayout->addWidget( stopBtn );
 
-        connect( rotateBtn, &QPushButton::clicked, this,
-                 [this, serial]() {
-                     deviceWidget_->rotateSession( serial );
-                     refreshDevices();
-                 } );
+        connect( rotateBtn, &QPushButton::clicked, this, [ this, serial ]() {
+            deviceWidget_->rotateSession( serial );
+            refreshDevices();
+        } );
 
-        connect( stopBtn, &QPushButton::clicked, this,
-                 [this, serial]() {
-                     deviceWidget_->stopSession( serial );
-                     refreshDevices();
-                 } );
+        connect( stopBtn, &QPushButton::clicked, this, [ this, serial ]() {
+            deviceWidget_->stopSession( serial );
+            refreshDevices();
+        } );
 
         // Replace the plain text item with the custom widget
         item->setSizeHint( row->sizeHint() );
@@ -316,8 +306,7 @@ void SidebarWidget::updateUiState()
         statusLabel_->setText( {} );
     }
     else {
-        statusLabel_->setText(
-            QString( "%1 active session(s)" ).arg( activeCount ) );
+        statusLabel_->setText( QString( "%1 active session(s)" ).arg( activeCount ) );
     }
 }
 
@@ -341,8 +330,7 @@ QString SidebarWidget::generateSavePath( const QString& serial ) const
     // Sanitise the serial for use as a filename component
     auto safeName = serial;
     safeName.replace( QRegularExpression( "[^a-zA-Z0-9._-]" ), "_" );
-    return QDir( dir ).filePath(
-        QString( "%1_%2.log" ).arg( timestamp, safeName ) );
+    return QDir( dir ).filePath( QString( "%1_%2.log" ).arg( timestamp, safeName ) );
 }
 
 void SidebarWidget::loadLogDir()

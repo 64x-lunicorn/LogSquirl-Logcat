@@ -26,6 +26,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Export compile_commands.json for tooling
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# The version logsquirl_plugin_get_info() reports: project(VERSION), which CI
+# requires to equal plugin.json's version.
+add_compile_definitions(LOGSQUIRL_PLUGIN_VERSION="${PROJECT_VERSION}")
+
 # ── Find Qt6 ──────────────────────────────────────────────────────────────
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets)
 qt_standard_project_setup()

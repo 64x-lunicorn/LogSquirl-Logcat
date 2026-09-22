@@ -84,7 +84,7 @@ void NewSessionWidget::updateMenu()
 
     for ( const auto& serial : serials ) {
         auto* action = menu_->addAction( serial );
-        connect( action, &QAction::triggered, this, [serial]() {
+        connect( action, &QAction::triggered, this, [ serial ]() {
             if ( g_state.dialog ) {
                 g_state.dialog->rotateSession( serial );
             }
