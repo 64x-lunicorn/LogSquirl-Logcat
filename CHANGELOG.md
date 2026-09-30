@@ -18,8 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no empty log file is left behind.
 - Temporary log files are now actually removed on shutdown (0.3.0's temp
   file cleanup never took effect): each stopped session reported back that
-  it had ended, and handling that preserved its file. It also rescanned
-  the devices once per session, blocking the shutdown.
+  it had ended, and handling that preserved its file; the files of a
+  rotated session were never removed at all. Shutdown also rescanned the
+  devices once per session, blocking it.
 - Device discovery no longer freezes LogSquirl: `adb devices` runs in the
   background instead of blocking the UI for up to 10 seconds, twice at
   startup and two or three times per Start or Stop. Starting and stopping

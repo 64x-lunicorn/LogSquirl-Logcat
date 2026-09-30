@@ -178,6 +178,14 @@ public:
     void preserveTempFile();
 
     /**
+     * Remove the temporary directory now, with the files of every rotation
+     * of this session, even if preserveTempFile() has been called.  For
+     * plugin shutdown, when no tab outlives the host.  Call after stop().
+     * A save path is not in the temporary directory and is kept.
+     */
+    void removeTempFiles();
+
+    /**
      * Rotate the log file: close the current temp file and open a new
      * one in the same temp directory.  The old file is preserved so the
      * existing LogSquirl tab keeps its content.  New logcat output is

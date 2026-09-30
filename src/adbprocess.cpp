@@ -331,6 +331,11 @@ void AdbProcess::preserveTempFile()
     }
 }
 
+void AdbProcess::removeTempFiles()
+{
+    tempDir_.remove();
+}
+
 QString AdbProcess::rotateLog()
 {
     if ( !isRunning() ) {

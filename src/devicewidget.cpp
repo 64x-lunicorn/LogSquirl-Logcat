@@ -233,7 +233,12 @@ void DeviceWidget::stopAll( bool cleanupTempFiles )
     for ( const auto& serial : serials ) {
         auto* proc = takeSession( serial );
         proc->stop();
-        if ( !cleanupTempFiles ) {
+        if ( cleanupTempFiles ) {
+            // Also the files of earlier rotations, which rotateSession()
+            // preserved for their tabs: at shutdown the tabs go too.
+            proc->removeTempFiles();
+        }
+        else {
             proc->preserveTempFile();
         }
         proc->deleteLater();
@@ -258,14 +263,15 @@ void DeviceWidget::rotateSession( const QString& serial )
         return;
     }
 
-    // Prevent old temp dir from being auto-removed so the old tab keeps its data
-    proc->preserveTempFile();
-
     const auto newPath = proc->rotateLog();
     if ( newPath.isEmpty() ) {
         // rotateLog() has reported why through errorOccurred()
         return;
     }
+
+    // The old tab keeps showing the old file, so the temporary directory
+    // must outlive this session (stopAll( true ) still removes it).
+    proc->preserveTempFile();
 
     // Open the new temp file in a follow-mode tab
     if ( g_state.api && g_state.handle ) {

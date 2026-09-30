@@ -73,8 +73,9 @@ public:
     ~DeviceWidget() override;
 
     /** Stop all active logcat sessions.
-     *  @param cleanupTempFiles  If true, temporary log files are removed
-     *         (used during plugin shutdown).  If false, they are preserved
+     *  @param cleanupTempFiles  If true, temporary log files are removed,
+     *         including those of earlier rotations (used during plugin
+     *         shutdown).  If false, they are preserved
      *         so that already-open tabs can still display the data.
      */
     void stopAll( bool cleanupTempFiles = false );
