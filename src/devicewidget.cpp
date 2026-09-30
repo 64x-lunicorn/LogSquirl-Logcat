@@ -195,18 +195,14 @@ void DeviceWidget::rotateSession( const QString& serial )
 
     const auto newPath = proc->rotateLog();
     if ( newPath.isEmpty() ) {
-        if ( g_state.api && g_state.handle ) {
-            g_state.api->show_notification( g_state.handle,
-                                            qPrintable( "Failed to rotate log for " + serial ) );
-        }
+        hostNotify( "Failed to rotate log for " + serial );
         return;
     }
 
     // Open the new temp file in a follow-mode tab
     if ( g_state.api && g_state.handle ) {
         g_state.api->open_file( g_state.handle, newPath.toUtf8().constData(), 1 );
-        g_state.api->show_notification(
-            g_state.handle, qPrintable( QString( "New session started for %1" ).arg( serial ) ) );
+        hostNotify( QString( "New session started for %1" ).arg( serial ) );
     }
 }
 
@@ -219,7 +215,7 @@ bool DeviceWidget::startSession( const QString& serial, const QString& savePath 
     auto* proc = new AdbProcess( serial, savePath, this );
 
     connect( proc, &AdbProcess::started, this, [ this, serial ]() {
-        hostLog( LOGSQUIRL_LOG_INFO, qPrintable( "Logcat session started for " + serial ) );
+        hostLog( LOGSQUIRL_LOG_INFO, "Logcat session started for " + serial );
     } );
 
     connect( proc, &AdbProcess::finished, this,
@@ -236,8 +232,7 @@ bool DeviceWidget::startSession( const QString& serial, const QString& savePath 
         if ( g_state.api && g_state.handle ) {
             const auto path = proc->tempFilePath().toUtf8();
             g_state.api->open_file( g_state.handle, path.constData(), 1 );
-            g_state.api->show_notification(
-                g_state.handle, qPrintable( QString( "Logcat started for %1" ).arg( serial ) ) );
+            hostNotify( QString( "Logcat started for %1" ).arg( serial ) );
         }
 
         refreshDevices();
@@ -258,12 +253,8 @@ void DeviceWidget::stopSession( const QString& serial )
     proc->stop();
     proc->preserveTempFile();
 
-    if ( g_state.api && g_state.handle ) {
-        g_state.api->show_notification( g_state.handle,
-                                        qPrintable( QString( "Logcat stopped for %1 (%2 lines)" )
-                                                        .arg( serial )
-                                                        .arg( proc->lineCount() ) ) );
-    }
+    hostNotify(
+        QString( "Logcat stopped for %1 (%2 lines)" ).arg( serial ).arg( proc->lineCount() ) );
 
     proc->deleteLater();
     refreshDevices();
@@ -323,7 +314,7 @@ void DeviceWidget::startCapture()
 
     // Don't start twice for the same device
     if ( sessions_.contains( serial ) ) {
-        hostLog( LOGSQUIRL_LOG_WARNING, qPrintable( "Logcat already running for " + serial ) );
+        hostLog( LOGSQUIRL_LOG_WARNING, "Logcat already running for " + serial );
         return;
     }
 
@@ -336,7 +327,7 @@ void DeviceWidget::startCapture()
     auto* proc = new AdbProcess( serial, savePath, this );
 
     connect( proc, &AdbProcess::started, this, [ this, serial ]() {
-        hostLog( LOGSQUIRL_LOG_INFO, qPrintable( "Logcat session started for " + serial ) );
+        hostLog( LOGSQUIRL_LOG_INFO, "Logcat session started for " + serial );
     } );
 
     connect( proc, &AdbProcess::finished, this,
@@ -357,10 +348,7 @@ void DeviceWidget::startCapture()
         }
 
         // Notify via host notification
-        if ( g_state.api && g_state.handle ) {
-            g_state.api->show_notification(
-                g_state.handle, qPrintable( QString( "Logcat started for %1" ).arg( serial ) ) );
-        }
+        hostNotify( QString( "Logcat started for %1" ).arg( serial ) );
     }
     else {
         // start() failed synchronously — proc emitted errorOccurred already
@@ -382,12 +370,8 @@ void DeviceWidget::stopCapture()
     proc->preserveTempFile();
     proc->deleteLater();
 
-    if ( g_state.api && g_state.handle ) {
-        g_state.api->show_notification( g_state.handle,
-                                        qPrintable( QString( "Logcat stopped for %1 (%2 lines)" )
-                                                        .arg( serial )
-                                                        .arg( proc->lineCount() ) ) );
-    }
+    hostNotify(
+        QString( "Logcat stopped for %1 (%2 lines)" ).arg( serial ).arg( proc->lineCount() ) );
 
     refreshDevices();
 }
@@ -396,9 +380,7 @@ void DeviceWidget::stopAllCaptures()
 {
     stopAll();
 
-    if ( g_state.api && g_state.handle ) {
-        g_state.api->show_notification( g_state.handle, "All logcat sessions stopped." );
-    }
+    hostNotify( "All logcat sessions stopped." );
 
     refreshDevices();
 }
@@ -424,8 +406,7 @@ void DeviceWidget::onSessionFinished( const QString& serial )
         proc->preserveTempFile();
         proc->deleteLater();
 
-        hostLog( LOGSQUIRL_LOG_INFO,
-                 qPrintable( QString( "Logcat session for %1 ended." ).arg( serial ) ) );
+        hostLog( LOGSQUIRL_LOG_INFO, QString( "Logcat session for %1 ended." ).arg( serial ) );
     }
 
     refreshDevices();
@@ -433,12 +414,9 @@ void DeviceWidget::onSessionFinished( const QString& serial )
 
 void DeviceWidget::onSessionError( const QString& serial, const QString& message )
 {
-    hostLog( LOGSQUIRL_LOG_ERROR, qPrintable( serial + ": " + message ) );
+    hostLog( LOGSQUIRL_LOG_ERROR, serial + ": " + message );
 
-    if ( g_state.api && g_state.handle ) {
-        g_state.api->show_notification( g_state.handle,
-                                        qPrintable( "Logcat error (" + serial + "): " + message ) );
-    }
+    hostNotify( "Logcat error (" + serial + "): " + message );
 }
 
 // ── Private helpers ─────────────────────────────────────────────────────
@@ -488,7 +466,7 @@ void DeviceWidget::configureAdbPath()
         settings.setValue( "adb/path", newPath );
         hostLog( LOGSQUIRL_LOG_INFO, newPath.isEmpty()
                                          ? "ADB path override cleared — using auto-detection."
-                                         : qPrintable( "ADB path set to: " + newPath ) );
+                                         : "ADB path set to: " + newPath );
         refreshDevices();
     }
 }

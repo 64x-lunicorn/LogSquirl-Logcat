@@ -168,16 +168,14 @@ QStringList AdbProcess::discoverDevices()
     }
 
     if ( proc.exitCode() != 0 ) {
-        hostLog( LOGSQUIRL_LOG_WARNING,
-                 qPrintable( "adb devices failed: " + proc.readAllStandardError() ) );
+        hostLog( LOGSQUIRL_LOG_WARNING, "adb devices failed: " + proc.readAllStandardError() );
         return {};
     }
 
     const auto output = proc.readAllStandardOutput();
     const auto devices = parseDeviceList( output );
 
-    hostLog( LOGSQUIRL_LOG_INFO,
-             qPrintable( QString( "Discovered %1 device(s)." ).arg( devices.size() ) ) );
+    hostLog( LOGSQUIRL_LOG_INFO, QString( "Discovered %1 device(s)." ).arg( devices.size() ) );
     return devices;
 }
 
@@ -257,8 +255,7 @@ void AdbProcess::start()
     process_.setArguments( { "-s", serial_, "logcat" } );
     process_.start();
 
-    hostLog( LOGSQUIRL_LOG_INFO,
-             qPrintable( QString( "Started logcat for device %1" ).arg( serial_ ) ) );
+    hostLog( LOGSQUIRL_LOG_INFO, QString( "Started logcat for device %1" ).arg( serial_ ) );
 }
 
 void AdbProcess::stop()
@@ -275,10 +272,9 @@ void AdbProcess::stop()
 
     tempFile_.close();
 
-    hostLog( LOGSQUIRL_LOG_INFO,
-             qPrintable( QString( "Stopped logcat for device %1 (%2 lines captured)" )
-                             .arg( serial_ )
-                             .arg( lineCount_ ) ) );
+    hostLog( LOGSQUIRL_LOG_INFO, QString( "Stopped logcat for device %1 (%2 lines captured)" )
+                                     .arg( serial_ )
+                                     .arg( lineCount_ ) );
 }
 
 void AdbProcess::preserveTempFile()
@@ -328,13 +324,13 @@ QString AdbProcess::rotateLog()
     tempFile_.setFileName( newPath );
     if ( !tempFile_.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
         hostLog( LOGSQUIRL_LOG_ERROR,
-                 qPrintable( "Failed to open rotated temp file: " + tempFile_.errorString() ) );
+                 "Failed to open rotated temp file: " + tempFile_.errorString() );
         return {};
     }
 
-    hostLog( LOGSQUIRL_LOG_INFO, qPrintable( QString( "Rotated logcat log for %1 (rotation #%2)" )
-                                                 .arg( serial_ )
-                                                 .arg( rotationCount_ ) ) );
+    hostLog( LOGSQUIRL_LOG_INFO, QString( "Rotated logcat log for %1 (rotation #%2)" )
+                                     .arg( serial_ )
+                                     .arg( rotationCount_ ) );
 
     return newPath;
 }
@@ -394,7 +390,7 @@ void AdbProcess::onFinished( int exitCode, QProcess::ExitStatus exitStatus )
 
     if ( exitStatus == QProcess::CrashExit ) {
         hostLog( LOGSQUIRL_LOG_WARNING,
-                 qPrintable( QString( "Logcat process for %1 crashed." ).arg( serial_ ) ) );
+                 QString( "Logcat process for %1 crashed." ).arg( serial_ ) );
     }
 
     Q_EMIT finished( exitCode );
@@ -418,7 +414,7 @@ void AdbProcess::onErrorOccurred( QProcess::ProcessError error )
         break;
     }
 
-    hostLog( LOGSQUIRL_LOG_ERROR, qPrintable( message ) );
+    hostLog( LOGSQUIRL_LOG_ERROR, message );
     Q_EMIT errorOccurred( message );
 }
 

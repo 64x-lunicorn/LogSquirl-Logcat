@@ -38,6 +38,8 @@
 
 #include "logsquirl_plugin_api.h"
 
+#include <QString>
+
 namespace logcat {
 class DeviceWidget;
 class SidebarWidget;
@@ -64,6 +66,11 @@ struct PluginState {
 extern PluginState g_state;
 
 /// Convenience: log via host API.  No-op if the plugin is not initialised.
-void hostLog( int level, const char* message );
+/// The host decodes the message as UTF-8.
+void hostLog( int level, const QString& message );
+
+/// Convenience: show a host notification.  No-op if the plugin is not
+/// initialised.  The host decodes the message as UTF-8.
+void hostNotify( const QString& message );
 
 } // namespace logcat

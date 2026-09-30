@@ -216,9 +216,7 @@ void SidebarWidget::stopAllCaptures()
 {
     deviceWidget_->stopAll();
 
-    if ( g_state.api && g_state.handle ) {
-        g_state.api->show_notification( g_state.handle, "All logcat sessions stopped." );
-    }
+    hostNotify( "All logcat sessions stopped." );
 
     refreshDevices();
 }

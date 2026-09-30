@@ -19,6 +19,7 @@ add_executable(logsquirl_logcat_tests
     parsedevicelist_test.cpp
     plugininfo_test.cpp
     adbprocess_test.cpp
+    hostapi_test.cpp
 )
 
 set_target_properties(logsquirl_logcat_tests PROPERTIES

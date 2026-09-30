@@ -56,10 +56,17 @@
 namespace logcat {
 PluginState g_state;
 
-void hostLog( int level, const char* message )
+void hostLog( int level, const QString& message )
 {
     if ( g_state.api && g_state.handle ) {
-        g_state.api->log_message( g_state.handle, level, message );
+        g_state.api->log_message( g_state.handle, level, message.toUtf8().constData() );
+    }
+}
+
+void hostNotify( const QString& message )
+{
+    if ( g_state.api && g_state.handle ) {
+        g_state.api->show_notification( g_state.handle, message.toUtf8().constData() );
     }
 }
 } // namespace logcat
@@ -209,7 +216,7 @@ LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_configure( void* parent_widget )
         settings.setValue( "adb/path", newPath );
         logcat::hostLog( LOGSQUIRL_LOG_INFO,
                          newPath.isEmpty() ? "ADB path override cleared — using auto-detection."
-                                           : qPrintable( "ADB path set to: " + newPath ) );
+                                           : "ADB path set to: " + newPath );
     }
 }
 
