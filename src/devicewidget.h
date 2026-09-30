@@ -25,7 +25,7 @@
  * It provides:
  *
  *   - A combo box listing discovered ADB devices
- *   - A "Refresh" button to re-scan for devices
+ *   - A "Refresh" button to re-scan for devices (in the background)
  *   - A "Start" button to begin logcat capture for the selected device
  *   - A "Stop" button to end the active session for the selected device
  *   - A "Stop All" button (shown when multiple sessions are active)
@@ -53,7 +53,9 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMap>
+#include <QProcess>
 #include <QPushButton>
+#include <QTimer>
 
 namespace logcat {
 
@@ -68,14 +70,31 @@ class DeviceWidget : public QDialog {
 
 public:
     explicit DeviceWidget( QWidget* parent = nullptr );
-    ~DeviceWidget() override = default;
+    ~DeviceWidget() override;
 
-    /** Stop all active logcat sessions.
-     *  @param cleanupTempFiles  If true, temporary log files are removed
-     *         (used during plugin shutdown).  If false, they are preserved
-     *         so that already-open tabs can still display the data.
+    /** What stopAll() does with the sessions' temporary log files. */
+    enum class TempFiles {
+        Keep,  ///< Keep them for the tabs that show them.
+        Remove ///< Remove them, including those of rotated and ended sessions.
+    };
+
+    /**
+     * Stop all active logcat sessions.
+     *
+     * @param tempFiles  TempFiles::Remove only when LogSquirl quits: then
+     *         the tabs showing the files close too.  When the plugin is
+     *         disabled or updated at runtime, its tabs stay open, and the
+     *         files must be kept.
      */
-    void stopAll( bool cleanupTempFiles = false );
+    void stopAll( TempFiles tempFiles = TempFiles::Keep );
+
+    /**
+     * Ask for the ADB executable path (Configure button, and Plugins →
+     * Configure), save it, and rescan the devices with it.
+     *
+     * @param parent  Parent of the input dialog.
+     */
+    void configureAdbPath( QWidget* parent );
 
     /** Number of currently running logcat sessions. */
     int activeSessionCount() const;
@@ -96,6 +115,7 @@ public:
      *
      * @param serial    Device serial to capture.
      * @param savePath  Optional path to a .log file for persistent saving.
+     *                  Refused if another active session writes to it.
      * @return true if the session started successfully, false otherwise.
      */
     bool startSession( const QString& serial, const QString& savePath = {} );
@@ -120,9 +140,35 @@ public:
      */
     bool isSessionActive( const QString& serial ) const;
 
-private Q_SLOTS:
-    /** Re-scan for ADB devices and update the combo box. */
+    /** Serials of the devices found by the most recent scan. */
+    const QStringList& devices() const
+    {
+        return devices_;
+    }
+
+public Q_SLOTS:
+    /**
+     * Re-scan for ADB devices.  `adb devices` runs in the background
+     * (starting the ADB server can take seconds); devicesChanged() is
+     * emitted when it has finished.  Requests made while a scan is
+     * running are folded into one more scan after it: the running scan
+     * may have started before whatever prompted the request.
+     */
     void refreshDevices();
+
+    /**
+     * Abandon a running device scan and start a new one, e.g. because the
+     * ADB path has changed and the running scan's result would be stale.
+     */
+    void restartDeviceScan();
+
+Q_SIGNALS:
+    /** Emitted when a device scan has finished and devices() is updated. */
+    void devicesChanged();
+
+private Q_SLOTS:
+    /** Take the result of a finished `adb devices` scan. */
+    void onScanFinished( int exitCode, QProcess::ExitStatus exitStatus );
 
     /** Start logcat for the currently selected device. */
     void startCapture();
@@ -136,9 +182,6 @@ private Q_SLOTS:
     /** Let the user browse for a save file path. */
     void browseSavePath();
 
-    /** Open a dialog to configure the ADB executable path. */
-    void configureAdbPath();
-
     /** Handle a logcat session ending (cleanup bookkeeping). */
     void onSessionFinished( const QString& serial );
 
@@ -149,8 +192,37 @@ private:
     /** Update UI state (button enable/disable, status label, ADB path). */
     void updateUiState();
 
+    /** Refill the device combo box from devices(), marking active sessions. */
+    void updateDeviceCombo();
+
+    /** Store the result of a scan and announce it. */
+    void setDevices( const QStringList& devices );
+
+    /** Run the rescan requested during the scan that has just ended. */
+    void onScanEnded();
+
+    /** Show on the Refresh button whether a scan is running. */
+    void updateRefreshButton();
+
     /** Return the serial of the currently selected device, or empty string. */
     QString currentSerial() const;
+
+    /**
+     * Remove the session for @p serial from the active sessions and cut its
+     * signals to this widget.  The caller stops and deletes it.
+     *
+     * @return The session, or nullptr if there is none for @p serial.
+     */
+    AdbProcess* takeSession( const QString& serial );
+
+    /**
+     * Keep the temporary files of a session that has ended for its tabs,
+     * and remember them, so that stopAll( TempFiles::Remove ) removes them.
+     */
+    void keepTempFiles( AdbProcess* proc );
+
+    /** Whether an active session writes to the file at @p path. */
+    bool isFileInUse( const QString& path ) const;
 
     // ── UI elements ──────────────────────────────────────────────────
     QComboBox* deviceCombo_ = nullptr;
@@ -165,8 +237,17 @@ private:
     QPushButton* adbConfigButton_ = nullptr;
     QLabel* statusLabel_ = nullptr;
 
+    // ── Device discovery ─────────────────────────────────────────────
+    QProcess* scanProcess_ = nullptr; ///< Runs `adb devices`.
+    QTimer* scanTimeout_ = nullptr;   ///< Gives up on a hanging scan.
+    QStringList devices_;             ///< Result of the last scan.
+    bool rescanPending_ = false;      ///< Scan again when the running scan ends.
+
     // ── Active sessions (serial → AdbProcess*) ──────────────────────
     QMap<QString, AdbProcess*> sessions_;
+
+    /// Temporary directories of ended sessions, kept for their tabs until shutdown.
+    QStringList endedTempDirs_;
 };
 
 } // namespace logcat

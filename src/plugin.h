@@ -38,6 +38,8 @@
 
 #include "logsquirl_plugin_api.h"
 
+#include <QString>
+
 namespace logcat {
 class DeviceWidget;
 class SidebarWidget;
@@ -58,12 +60,18 @@ struct PluginState {
     DeviceWidget* dialog = nullptr;         ///< Logcat session dialog.
     SidebarWidget* sidebarWidget = nullptr; ///< Sidebar panel for session control.
     bool initialised = false;               ///< True between init() and shutdown().
+    bool quitting = false; ///< LogSquirl is quitting (aboutToQuit), not just unloading the plugin.
 };
 
 /// Singleton plugin state.  Defined in plugin.cpp.
 extern PluginState g_state;
 
 /// Convenience: log via host API.  No-op if the plugin is not initialised.
-void hostLog( int level, const char* message );
+/// The host decodes the message as UTF-8.
+void hostLog( int level, const QString& message );
+
+/// Convenience: show a host notification.  No-op if the plugin is not
+/// initialised.  The host decodes the message as UTF-8.
+void hostNotify( const QString& message );
 
 } // namespace logcat

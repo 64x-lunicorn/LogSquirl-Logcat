@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Log messages and notifications reach LogSquirl as UTF-8, so non-ASCII
+  device names and paths are no longer garbled on systems whose local
+  8-bit encoding is not UTF-8.
+- Lines that adb terminates with `\r\n` no longer keep a stray carriage
+  return in the log file.
+- A session whose adb cannot be launched is no longer listed as active
+  with nothing running: the error is shown once, no tab is opened, and
+  no empty log file is left behind. An adb that does not start within
+  5 seconds is given up on with a message, instead of freezing LogSquirl
+  for 30 seconds and failing silently.
+- Temporary log files are now removed when LogSquirl quits: those of the
+  running sessions and of every session that was stopped, ended or
+  rotated away before, whose tabs close with LogSquirl. When the plugin is
+  disabled or updated while LogSquirl keeps running, its sessions are
+  stopped but every file is kept, since open tabs may still show them.
+  0.3.0's cleanup never took effect: each session stopped at shutdown
+  reported back that it had ended, and handling that preserved its file,
+  while the files of earlier and rotated sessions were never removed at
+  all. Save paths and files in the log directory are never removed. Shutdown also rescanned the
+  devices once per session, blocking it.
+- Device discovery no longer freezes LogSquirl: `adb devices` runs in the
+  background instead of blocking the UI for up to 10 seconds, twice at
+  startup and two or three times per Start or Stop. Starting and stopping
+  a session no longer rescan at all. Refreshes requested while a scan is
+  running are combined into one more scan after it, the Refresh button
+  shows "Scanning…" meanwhile, and changing the ADB path (in the dialog
+  or in Plugins → Configure) abandons a running scan for one with the new
+  path.
+- On Windows, an adb that cannot be started no longer logs a false "adb
+  devices timed out" 10 seconds later, and closing the dialog while a
+  device scan runs kills the scan instead of leaving it to Qt.
+- Stopping a session on Windows no longer freezes LogSquirl for three
+  seconds: adb is killed right away, since as a console program it ignores
+  the polite request to close.
+- The Android Logcat dialog (Plugins menu) stays on top of LogSquirl's
+  window, and no longer keeps LogSquirl running when it is open while the
+  main window is closed.
+- adb's stderr is no longer discarded: its warnings go to the LogSquirl
+  log, and when adb exits with an error (device offline, not found,
+  unauthorised) the notification says what adb reported.
+- Deleting the dialog with sessions still running no longer calls back
+  into the half-destroyed dialog.
+- Stopping a session no longer shows an "ADB process crashed" error on
+  macOS and Linux, where adb ends from the stop signal.
+- Starting, stopping and rotating never truncate an existing log file.
+  A save path is appended to, so Stop and Start keep the earlier capture;
+  generated file names get a `_2`, `_3`, … suffix when a file of that
+  name exists, so a rotation within the same second as the start no
+  longer wipes the capture it rotates away from.
+- A rotation that cannot create its new file no longer leaves the session
+  running with its log file closed, which silently dropped all further
+  output: the capture continues in the old file and the error is shown.
+- A second session is refused instead of writing into the save path of
+  one that is still running.
+- Wireless devices (`192.168.1.5:5555`) get a valid temporary file name
+  on Windows: the serial's `:` is replaced, as it already was for files
+  in the log directory.
+
 ## [0.3.0] — 2026-04-02
 
 ### Added

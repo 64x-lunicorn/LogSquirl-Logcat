@@ -44,15 +44,48 @@
 #include "devicewidget.h"
 #include "plugin.h"
 
+#include <QDir>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QMessageBox>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QVBoxLayout>
 
+#include <utility>
+
 namespace logcat {
+
+namespace {
+
+/**
+ * Whether @p a and @p b name the same file.  Existing files are compared
+ * by their canonical path (resolving symlinks); otherwise the cleaned
+ * absolute paths are compared.  QFileInfo's own operator== cannot be
+ * used: two files that do not exist both have an empty canonical path,
+ * and compare equal.
+ */
+bool isSameFile( const QString& a, const QString& b )
+{
+    const QFileInfo fileA( a );
+    const QFileInfo fileB( b );
+    if ( fileA.exists() && fileB.exists() ) {
+        return fileA.canonicalFilePath() == fileB.canonicalFilePath();
+    }
+#if defined( Q_OS_WIN ) || defined( Q_OS_MACOS )
+    constexpr auto sensitivity = Qt::CaseInsensitive;
+#else
+    constexpr auto sensitivity = Qt::CaseSensitive;
+#endif
+    return QDir::cleanPath( fileA.absoluteFilePath() )
+               .compare( QDir::cleanPath( fileB.absoluteFilePath() ), sensitivity )
+           == 0;
+}
+
+} // namespace
 
 // ── Construction ────────────────────────────────────────────────────────
 
@@ -61,6 +94,10 @@ DeviceWidget::DeviceWidget( QWidget* parent )
 {
     setWindowTitle( "Android Logcat" );
     setMinimumWidth( 420 );
+
+    // A top-level window of the plugin's own: when it is open while the
+    // user closes LogSquirl's main window, LogSquirl must still quit.
+    setAttribute( Qt::WA_QuitOnClose, false );
 
     auto* mainLayout = new QVBoxLayout( this );
 
@@ -75,6 +112,7 @@ DeviceWidget::DeviceWidget( QWidget* parent )
     deviceRow->addWidget( deviceCombo_ );
 
     refreshButton_ = new QPushButton( "⟳ Refresh", this );
+    refreshButton_->setObjectName( "refresh" );
     refreshButton_->setToolTip( "Refresh device list" );
     deviceRow->addWidget( refreshButton_ );
     deviceLayout->addLayout( deviceRow );
@@ -145,32 +183,82 @@ DeviceWidget::DeviceWidget( QWidget* parent )
     connect( stopButton_, &QPushButton::clicked, this, &DeviceWidget::stopCapture );
     connect( stopAllButton_, &QPushButton::clicked, this, &DeviceWidget::stopAllCaptures );
     connect( browseButton_, &QPushButton::clicked, this, &DeviceWidget::browseSavePath );
-    connect( adbConfigButton_, &QPushButton::clicked, this, &DeviceWidget::configureAdbPath );
+    connect( adbConfigButton_, &QPushButton::clicked, this,
+             [ this ]() { configureAdbPath( this ); } );
     connect( saveCheckBox_, &QCheckBox::toggled, savePathEdit_, &QLineEdit::setEnabled );
     connect( saveCheckBox_, &QCheckBox::toggled, browseButton_, &QPushButton::setEnabled );
     connect( deviceCombo_, &QComboBox::currentIndexChanged, this, [ this ]() { updateUiState(); } );
 
+    // ── Device discovery ─────────────────────────────────────────────
+    scanProcess_ = new QProcess( this );
+    connect( scanProcess_, &QProcess::finished, this, &DeviceWidget::onScanFinished );
+    connect( scanProcess_, &QProcess::errorOccurred, this,
+             [ this ]( QProcess::ProcessError error ) {
+                 // No finished() follows a failed start
+                 if ( error == QProcess::FailedToStart ) {
+                     scanTimeout_->stop();
+                     hostLog( LOGSQUIRL_LOG_WARNING,
+                              "adb devices could not be started: " + scanProcess_->errorString() );
+                     setDevices( {} );
+                     onScanEnded();
+                 }
+             } );
+
+    // The first scan may need to start the ADB server, which can take
+    // several seconds; give up after 10.
+    scanTimeout_ = new QTimer( this );
+    scanTimeout_->setSingleShot( true );
+    scanTimeout_->setInterval( 10000 );
+    connect( scanTimeout_, &QTimer::timeout, this, [ this ]() {
+        hostLog( LOGSQUIRL_LOG_WARNING, "adb devices timed out." );
+        scanProcess_->kill();
+    } );
+
     // Initial device scan
+    updateDeviceCombo();
     refreshDevices();
-    updateUiState();
+}
+
+DeviceWidget::~DeviceWidget()
+{
+    // The scan must not report into a half-destroyed widget, and a scan
+    // that is still running is killed and reaped here rather than left
+    // to ~QProcess, which only warns and waits for it.
+    scanProcess_->disconnect( this );
+    if ( scanProcess_->state() != QProcess::NotRunning ) {
+        scanProcess_->kill();
+        scanProcess_->waitForFinished( 1000 );
+    }
 }
 
 // ── Public methods ──────────────────────────────────────────────────────
 
-void DeviceWidget::stopAll( bool cleanupTempFiles )
+void DeviceWidget::stopAll( TempFiles tempFiles )
 {
     const auto serials = sessions_.keys();
     for ( const auto& serial : serials ) {
-        if ( auto* proc = sessions_.value( serial ) ) {
-            proc->stop();
-            if ( !cleanupTempFiles ) {
-                proc->preserveTempFile();
-            }
-            proc->deleteLater();
+        auto* proc = takeSession( serial );
+        proc->stop();
+        if ( tempFiles == TempFiles::Remove ) {
+            // Also the files of earlier rotations, which rotateSession()
+            // preserved for their tabs: at shutdown the tabs go too.
+            proc->removeTempFiles();
         }
+        else {
+            keepTempFiles( proc );
+        }
+        proc->deleteLater();
     }
-    sessions_.clear();
-    updateUiState();
+    if ( tempFiles == TempFiles::Remove ) {
+        // The tabs of sessions that ended before close with the host too.
+        // These are the sessions' own temporary directories, never a save
+        // path or the log directory.
+        for ( const auto& dir : std::as_const( endedTempDirs_ ) ) {
+            QDir( dir ).removeRecursively();
+        }
+        endedTempDirs_.clear();
+    }
+    updateDeviceCombo();
 }
 
 int DeviceWidget::activeSessionCount() const
@@ -190,23 +278,20 @@ void DeviceWidget::rotateSession( const QString& serial )
         return;
     }
 
-    // Prevent old temp dir from being auto-removed so the old tab keeps its data
-    proc->preserveTempFile();
-
     const auto newPath = proc->rotateLog();
     if ( newPath.isEmpty() ) {
-        if ( g_state.api && g_state.handle ) {
-            g_state.api->show_notification( g_state.handle,
-                                            qPrintable( "Failed to rotate log for " + serial ) );
-        }
+        // rotateLog() has reported why through errorOccurred()
         return;
     }
+
+    // The old tab keeps showing the old file, so the temporary directory
+    // must outlive this session (stopAll( TempFiles::Remove ) still removes it).
+    proc->preserveTempFile();
 
     // Open the new temp file in a follow-mode tab
     if ( g_state.api && g_state.handle ) {
         g_state.api->open_file( g_state.handle, newPath.toUtf8().constData(), 1 );
-        g_state.api->show_notification(
-            g_state.handle, qPrintable( QString( "New session started for %1" ).arg( serial ) ) );
+        hostNotify( QString( "New session started for %1" ).arg( serial ) );
     }
 }
 
@@ -216,11 +301,17 @@ bool DeviceWidget::startSession( const QString& serial, const QString& savePath 
         return false;
     }
 
-    auto* proc = new AdbProcess( serial, savePath, this );
+    // Two sessions appending to one file would interleave their lines.
+    if ( !savePath.isEmpty() && isFileInUse( savePath ) ) {
+        const auto message = QString( "Logcat not started for %1: another session is already "
+                                      "writing to %2." )
+                                 .arg( serial, savePath );
+        hostLog( LOGSQUIRL_LOG_WARNING, message );
+        hostNotify( message );
+        return false;
+    }
 
-    connect( proc, &AdbProcess::started, this, [ this, serial ]() {
-        hostLog( LOGSQUIRL_LOG_INFO, qPrintable( "Logcat session started for " + serial ) );
-    } );
+    auto* proc = new AdbProcess( serial, savePath, this );
 
     connect( proc, &AdbProcess::finished, this,
              [ this, serial ]( int ) { onSessionFinished( serial ); } );
@@ -228,45 +319,40 @@ bool DeviceWidget::startSession( const QString& serial, const QString& savePath 
     connect( proc, &AdbProcess::errorOccurred, this,
              [ this, serial ]( const QString& msg ) { onSessionError( serial, msg ); } );
 
-    proc->start();
-
-    if ( proc->isRunning() || !proc->tempFilePath().isEmpty() ) {
-        sessions_.insert( serial, proc );
-
-        if ( g_state.api && g_state.handle ) {
-            const auto path = proc->tempFilePath().toUtf8();
-            g_state.api->open_file( g_state.handle, path.constData(), 1 );
-            g_state.api->show_notification(
-                g_state.handle, qPrintable( QString( "Logcat started for %1" ).arg( serial ) ) );
-        }
-
-        refreshDevices();
-        return true;
+    if ( !proc->start() ) {
+        // start() has reported why through errorOccurred()
+        delete proc;
+        return false;
     }
 
-    delete proc;
-    return false;
+    sessions_.insert( serial, proc );
+
+    // Ask the host to open the log file in a follow-mode tab
+    if ( g_state.api && g_state.handle ) {
+        const auto path = proc->tempFilePath().toUtf8();
+        g_state.api->open_file( g_state.handle, path.constData(), 1 );
+    }
+    hostNotify( QString( "Logcat started for %1" ).arg( serial ) );
+
+    updateDeviceCombo(); // Update combo box markers
+    return true;
 }
 
 void DeviceWidget::stopSession( const QString& serial )
 {
-    if ( !sessions_.contains( serial ) ) {
+    auto* proc = takeSession( serial );
+    if ( !proc ) {
         return;
     }
 
-    auto* proc = sessions_.take( serial );
     proc->stop();
-    proc->preserveTempFile();
+    keepTempFiles( proc );
 
-    if ( g_state.api && g_state.handle ) {
-        g_state.api->show_notification( g_state.handle,
-                                        qPrintable( QString( "Logcat stopped for %1 (%2 lines)" )
-                                                        .arg( serial )
-                                                        .arg( proc->lineCount() ) ) );
-    }
+    hostNotify(
+        QString( "Logcat stopped for %1 (%2 lines)" ).arg( serial ).arg( proc->lineCount() ) );
 
     proc->deleteLater();
-    refreshDevices();
+    updateDeviceCombo();
 }
 
 qint64 DeviceWidget::sessionLineCount( const QString& serial ) const
@@ -284,17 +370,100 @@ bool DeviceWidget::isSessionActive( const QString& serial ) const
 
 void DeviceWidget::refreshDevices()
 {
+    if ( scanProcess_->state() != QProcess::NotRunning ) {
+        rescanPending_ = true;
+        return;
+    }
+
+    const auto adb = AdbProcess::findAdb();
+    if ( adb.isEmpty() ) {
+        hostLog( LOGSQUIRL_LOG_WARNING, "adb not found — cannot discover devices." );
+        setDevices( {} );
+        updateRefreshButton(); // a scan that ended just before may have left it "Scanning…"
+        return;
+    }
+
+    scanProcess_->setProgram( adb );
+    scanProcess_->setArguments( { "devices" } );
+    // Arm the timeout first: on Windows a failed start is reported from
+    // inside start(), and that handler stops the timeout.
+    scanTimeout_->start();
+    scanProcess_->start();
+    updateRefreshButton();
+}
+
+void DeviceWidget::restartDeviceScan()
+{
+    if ( scanProcess_->state() != QProcess::NotRunning ) {
+        // Its result is not wanted, not even as an empty list.
+        const QSignalBlocker blocker( scanProcess_ );
+        scanTimeout_->stop();
+        scanProcess_->kill();
+        scanProcess_->waitForFinished( 1000 );
+    }
+    rescanPending_ = false;
+    refreshDevices();
+}
+
+void DeviceWidget::onScanFinished( int exitCode, QProcess::ExitStatus exitStatus )
+{
+    scanTimeout_->stop();
+
+    QStringList found;
+    if ( exitStatus == QProcess::CrashExit ) {
+        // Killed after the timeout, which has been logged already
+    }
+    else if ( exitCode != 0 ) {
+        hostLog( LOGSQUIRL_LOG_WARNING,
+                 "adb devices failed: "
+                     + QString::fromUtf8( scanProcess_->readAllStandardError() ).trimmed() );
+    }
+    else {
+        found = AdbProcess::parseDeviceList( scanProcess_->readAllStandardOutput() );
+        hostLog( LOGSQUIRL_LOG_INFO, QString( "Discovered %1 device(s)." ).arg( found.size() ) );
+    }
+
+    setDevices( found );
+    onScanEnded();
+}
+
+void DeviceWidget::onScanEnded()
+{
+    if ( rescanPending_ ) {
+        rescanPending_ = false;
+        refreshDevices();
+    }
+    else {
+        updateRefreshButton();
+    }
+}
+
+void DeviceWidget::updateRefreshButton()
+{
+    const bool scanning = scanProcess_->state() != QProcess::NotRunning;
+    refreshButton_->setEnabled( !scanning );
+    refreshButton_->setText( scanning ? "Scanning…" : "⟳ Refresh" );
+}
+
+void DeviceWidget::setDevices( const QStringList& devices )
+{
+    devices_ = devices;
+    updateDeviceCombo();
+    Q_EMIT devicesChanged();
+}
+
+void DeviceWidget::updateDeviceCombo()
+{
     const auto currentSelection = currentSerial();
     deviceCombo_->clear();
 
-    const auto devices = AdbProcess::discoverDevices();
-    if ( devices.isEmpty() ) {
+    if ( devices_.isEmpty() ) {
         deviceCombo_->addItem( "(no devices)" );
         deviceCombo_->setEnabled( false );
     }
     else {
         deviceCombo_->setEnabled( true );
-        for ( const auto& serial : devices ) {
+        for ( const auto& serial : devices_ ) {
             // Mark devices that already have an active session
             if ( sessions_.contains( serial ) ) {
                 deviceCombo_->addItem( serial + " ●", serial );
@@ -323,7 +492,7 @@ void DeviceWidget::startCapture()
 
     // Don't start twice for the same device
     if ( sessions_.contains( serial ) ) {
-        hostLog( LOGSQUIRL_LOG_WARNING, qPrintable( "Logcat already running for " + serial ) );
+        hostLog( LOGSQUIRL_LOG_WARNING, "Logcat already running for " + serial );
         return;
     }
 
@@ -332,82 +501,27 @@ void DeviceWidget::startCapture()
                               ? savePathEdit_->text()
                               : QString();
 
-    // Create and start the ADB process
-    auto* proc = new AdbProcess( serial, savePath, this );
-
-    connect( proc, &AdbProcess::started, this, [ this, serial ]() {
-        hostLog( LOGSQUIRL_LOG_INFO, qPrintable( "Logcat session started for " + serial ) );
-    } );
-
-    connect( proc, &AdbProcess::finished, this,
-             [ this, serial ]( int ) { onSessionFinished( serial ); } );
-
-    connect( proc, &AdbProcess::errorOccurred, this,
-             [ this, serial ]( const QString& msg ) { onSessionError( serial, msg ); } );
-
-    proc->start();
-
-    if ( proc->isRunning() || !proc->tempFilePath().isEmpty() ) {
-        sessions_.insert( serial, proc );
-
-        // Ask the host to open the temp file in a follow-mode tab
-        if ( g_state.api && g_state.handle ) {
-            const auto path = proc->tempFilePath().toUtf8();
-            g_state.api->open_file( g_state.handle, path.constData(), 1 );
-        }
-
-        // Notify via host notification
-        if ( g_state.api && g_state.handle ) {
-            g_state.api->show_notification(
-                g_state.handle, qPrintable( QString( "Logcat started for %1" ).arg( serial ) ) );
-        }
-    }
-    else {
-        // start() failed synchronously — proc emitted errorOccurred already
-        delete proc;
-    }
-
-    refreshDevices(); // Update combo box markers
+    startSession( serial, savePath );
 }
 
 void DeviceWidget::stopCapture()
 {
-    const auto serial = currentSerial();
-    if ( serial.isEmpty() || !sessions_.contains( serial ) ) {
-        return;
-    }
-
-    auto* proc = sessions_.take( serial );
-    proc->stop();
-    proc->preserveTempFile();
-    proc->deleteLater();
-
-    if ( g_state.api && g_state.handle ) {
-        g_state.api->show_notification( g_state.handle,
-                                        qPrintable( QString( "Logcat stopped for %1 (%2 lines)" )
-                                                        .arg( serial )
-                                                        .arg( proc->lineCount() ) ) );
-    }
-
-    refreshDevices();
+    stopSession( currentSerial() );
 }
 
 void DeviceWidget::stopAllCaptures()
 {
     stopAll();
 
-    if ( g_state.api && g_state.handle ) {
-        g_state.api->show_notification( g_state.handle, "All logcat sessions stopped." );
-    }
-
-    refreshDevices();
+    hostNotify( "All logcat sessions stopped." );
 }
 
 void DeviceWidget::browseSavePath()
 {
-    const auto path
-        = QFileDialog::getSaveFileName( this, "Save logcat output", savePathEdit_->text(),
-                                        "Log files (*.log *.txt);;All files (*)" );
+    // An existing file is appended to, not replaced, so don't ask to replace it.
+    const auto path = QFileDialog::getSaveFileName(
+        this, "Save logcat output", savePathEdit_->text(), "Log files (*.log *.txt);;All files (*)",
+        nullptr, QFileDialog::DontConfirmOverwrite );
 
     if ( !path.isEmpty() ) {
         savePathEdit_->setText( path );
@@ -416,29 +530,27 @@ void DeviceWidget::browseSavePath()
 
 void DeviceWidget::onSessionFinished( const QString& serial )
 {
-    if ( sessions_.contains( serial ) ) {
-        auto* proc = sessions_.take( serial );
-
-        // Preserve the temp file so the LogSquirl tab keeps its content.
-        // When using a save path the file is already persistent.
-        proc->preserveTempFile();
-        proc->deleteLater();
-
-        hostLog( LOGSQUIRL_LOG_INFO,
-                 qPrintable( QString( "Logcat session for %1 ended." ).arg( serial ) ) );
+    auto* proc = takeSession( serial );
+    if ( !proc ) {
+        return;
     }
 
+    // Preserve the temp file so the LogSquirl tab keeps its content.
+    // When using a save path the file is already persistent.
+    keepTempFiles( proc );
+    proc->deleteLater();
+
+    hostLog( LOGSQUIRL_LOG_INFO, QString( "Logcat session for %1 ended." ).arg( serial ) );
+
+    // adb exits when its device goes away; find out whether it did
     refreshDevices();
 }
 
 void DeviceWidget::onSessionError( const QString& serial, const QString& message )
 {
-    hostLog( LOGSQUIRL_LOG_ERROR, qPrintable( serial + ": " + message ) );
+    hostLog( LOGSQUIRL_LOG_ERROR, serial + ": " + message );
 
-    if ( g_state.api && g_state.handle ) {
-        g_state.api->show_notification( g_state.handle,
-                                        qPrintable( "Logcat error (" + serial + "): " + message ) );
-    }
+    hostNotify( "Logcat error (" + serial + "): " + message );
 }
 
 // ── Private helpers ─────────────────────────────────────────────────────
@@ -467,7 +579,7 @@ void DeviceWidget::updateUiState()
     adbPathLabel_->setText( adbPath.isEmpty() ? "(not found)" : adbPath );
 }
 
-void DeviceWidget::configureAdbPath()
+void DeviceWidget::configureAdbPath( QWidget* parent )
 {
     const auto configDir = AdbProcess::configDir();
     QSettings settings( configDir + "/logcat.ini", QSettings::IniFormat );
@@ -481,16 +593,47 @@ void DeviceWidget::configureAdbPath()
                                   currentPath.isEmpty() ? "(none)" : currentPath );
 
     bool ok = false;
-    const auto newPath = QInputDialog::getText( this, "Configure ADB Path", prompt,
+    const auto newPath = QInputDialog::getText( parent, "Configure ADB Path", prompt,
                                                 QLineEdit::Normal, currentPath, &ok );
 
     if ( ok ) {
         settings.setValue( "adb/path", newPath );
         hostLog( LOGSQUIRL_LOG_INFO, newPath.isEmpty()
                                          ? "ADB path override cleared — using auto-detection."
-                                         : qPrintable( "ADB path set to: " + newPath ) );
-        refreshDevices();
+                                         : "ADB path set to: " + newPath );
+        restartDeviceScan();
     }
+}
+
+AdbProcess* DeviceWidget::takeSession( const QString& serial )
+{
+    auto* proc = sessions_.take( serial );
+    if ( proc ) {
+        // The session is over as far as this widget is concerned.  Stopping
+        // it emits finished(), and onSessionFinished() must not act on that:
+        // it would preserve a temp file that stopAll() is about to remove,
+        // and rescan the devices once per session.
+        proc->disconnect( this );
+    }
+    return proc;
+}
+
+void DeviceWidget::keepTempFiles( AdbProcess* proc )
+{
+    const auto dir = proc->preserveTempFile();
+    if ( !dir.isEmpty() && !endedTempDirs_.contains( dir ) ) {
+        endedTempDirs_.append( dir );
+    }
+}
+
+bool DeviceWidget::isFileInUse( const QString& path ) const
+{
+    for ( const auto* proc : sessions_ ) {
+        if ( isSameFile( proc->tempFilePath(), path ) ) {
+            return true;
+        }
+    }
+    return false;
 }
 
 QString DeviceWidget::currentSerial() const

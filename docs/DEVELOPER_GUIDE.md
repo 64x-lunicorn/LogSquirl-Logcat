@@ -330,6 +330,7 @@ classDiagram
         -QPushButton* startButton_
         -QPushButton* stopButton_
         -map~QString, AdbProcess*~ sessions_
+        -QProcess* scanProcess_
         +refreshDevices()
         +startCapture()
         +stopCapture()
@@ -347,7 +348,6 @@ classDiagram
         +tempFilePath() QString
         +parseDeviceList(QByteArray)$ QStringList
         +findAdb()$ QString
-        +discoverDevices()$ QStringList
     }
 
     PluginState --> DeviceWidget : dialog

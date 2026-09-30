@@ -34,13 +34,14 @@
  * USAGE
  * ─────
  *   auto* proc = new AdbProcess( "SERIAL123", "/optional/save.log", parent );
- *   proc->start();                    // launches `adb -s SERIAL123 logcat`
- *   qDebug() << proc->tempFilePath(); // LogSquirl opens this file
- *   proc->stop();                     // sends SIGTERM, waits for exit
+ *   if ( proc->start() )              // launches `adb -s SERIAL123 logcat`
+ *       qDebug() << proc->tempFilePath(); // LogSquirl opens this file
+ *   proc->stop();                     // ends adb, waits for exit
  */
 
 #pragma once
 
+#include <QDateTime>
 #include <QFile>
 #include <QObject>
 #include <QProcess>
@@ -77,6 +78,8 @@ public:
      */
     explicit AdbProcess( const QString& serial, const QString& savePath = {},
                          QObject* parent = nullptr );
+
+    /** Stops the process without emitting any signal. */
     ~AdbProcess() override;
 
     // ── Static helpers ───────────────────────────────────────────────
@@ -95,18 +98,11 @@ public:
     static QString findAdb();
 
     /**
-     * Run `adb devices` and return a list of attached device serials.
-     *
-     * Each entry is the first column from `adb devices` output, e.g.
-     * "emulator-5554" or "R5CR10XXXXX".  Only devices with status
-     * "device" (not "offline" or "unauthorized") are included.
-     *
-     * @return List of device serial strings, possibly empty.
-     */
-    static QStringList discoverDevices();
-
-    /**
      * Parse the raw output of `adb devices` into a list of device serials.
+     *
+     * Each entry is the first column of the output, e.g. "emulator-5554"
+     * or "R5CR10XXXXX".  Only devices with status "device" (not "offline"
+     * or "unauthorized") are included.
      *
      * Extracted as a static helper so unit tests can exercise the parsing
      * logic without running a real ADB process.
@@ -117,31 +113,93 @@ public:
     static QStringList parseDeviceList( const QByteArray& output );
 
     /**
+     * Remove every complete line from the front of @p buffer and return
+     * the lines, without their "\n" or "\r\n" terminator.  An incomplete
+     * last line stays in the buffer until more data arrives.
+     *
+     * Extracted as a static helper so unit tests can exercise the line
+     * splitting without running a real ADB process.
+     *
+     * @param buffer  Bytes read from adb so far; complete lines are removed.
+     * @return The complete lines, in order.
+     */
+    static QList<QByteArray> takeLines( QByteArray& buffer );
+
+    /**
+     * Return a path for a new log file in @p dir, named
+     * `<yyyy-MM-dd_HHmmss>_<serial>.log`.  Characters of the serial that
+     * are not valid in file names (the ':' of a wireless device's
+     * "192.168.1.5:5555") are replaced by '_'.  If that file exists, a
+     * number is appended (`…_2.log`, `…_3.log`, …), so that two captures
+     * within the same second never share a file.
+     *
+     * @param dir        Directory the file will be created in.
+     * @param serial     ADB device serial.
+     * @param timestamp  Time the capture starts.
+     * @return Absolute path of a file that does not exist yet.
+     */
+    static QString generateLogPath( const QString& dir, const QString& serial,
+                                    const QDateTime& timestamp = QDateTime::currentDateTime() );
+
+    /**
      * Return the plugin's config directory from the host API.
      * Falls back to a temp path if the plugin is not initialised.
      */
     static QString configDir();
 
+    /// How long start() waits for adb to launch before giving up.
+    static constexpr int kStartTimeoutMs = 5000;
+
     // ── Instance methods ─────────────────────────────────────────────
 
-    /** Start the logcat process.  No-op if already running. */
-    void start();
+    /**
+     * Open the log file and launch the logcat process.  No-op if already
+     * running.
+     *
+     * A save path is appended to, so an earlier capture in that file is
+     * never overwritten.
+     *
+     * On failure the reason has been emitted through errorOccurred(), and
+     * a log file that start() created is removed again.
+     *
+     * @return true if adb is running, false if the session did not start.
+     */
+    bool start();
 
-    /** Stop the logcat process (SIGTERM).  No-op if not running. */
+    /**
+     * Stop the logcat process: SIGTERM on Unix, kill on Windows (where
+     * adb, a console program, ignores terminate()).  Waits at most two
+     * seconds.  No-op if not running.
+     */
     void stop();
 
     /**
      * Prevent the temporary log file from being deleted when this
      * object is destroyed.  Call before deleteLater() so that the
      * LogSquirl tab can keep displaying the captured output.
+     *
+     * @return The temporary directory left on disk, or empty when the
+     *         session writes to a save path (nothing to preserve).
      */
-    void preserveTempFile();
+    QString preserveTempFile();
+
+    /**
+     * Remove the temporary directory now, with the files of every rotation
+     * of this session, even if preserveTempFile() has been called.  For
+     * plugin shutdown, when no tab outlives the host.  Call after stop().
+     * A save path is not in the temporary directory and is kept.
+     */
+    void removeTempFiles();
 
     /**
      * Rotate the log file: close the current temp file and open a new
      * one in the same temp directory.  The old file is preserved so the
      * existing LogSquirl tab keeps its content.  New logcat output is
      * redirected to the new file.
+     *
+     * If the new file cannot be created, errorOccurred() is emitted and
+     * the capture continues in the old file; if that cannot be reopened
+     * either, the session is stopped (finished() is emitted).
      *
      * @return Absolute path to the new temp file, or empty on failure.
      */
@@ -185,12 +243,19 @@ Q_SIGNALS:
     /** Emitted when the logcat process exits (normally or on error). */
     void finished( int exitCode );
 
-    /** Emitted when an error occurs (ADB not found, process crash, …). */
+    /**
+     * Emitted when an error occurs (ADB not found, process crash, adb
+     * exiting with an error, …).  Not emitted for the exit that stop()
+     * causes.
+     */
     void errorOccurred( const QString& message );
 
 private Q_SLOTS:
     /** Handle new data available on stdout. */
     void onReadyRead();
+
+    /** Forward adb's stderr to the host log. */
+    void onReadyReadStandardError();
 
     /** Handle process exit. */
     void onFinished( int exitCode, QProcess::ExitStatus exitStatus );
@@ -199,17 +264,35 @@ private Q_SLOTS:
     void onErrorOccurred( QProcess::ProcessError error );
 
 private:
+    /**
+     * End adb: SIGTERM on Unix, kill on Windows, then kill after a second.
+     * Waits at most two seconds; the exit is not reported as an error.
+     */
+    void endProcess();
+
+    /** Write one line to the log file, terminated by "\n". */
+    void writeLine( const QByteArray& line );
+
+    /** Write out a buffered partial line, e.g. before the file is closed. */
+    void flushPartialLine();
+
+    /** Close the log file after a failed start; remove it if start() created it. */
+    void discardLogFile();
+
     QString serial_;
     QString savePath_;
 
     QProcess process_;
     QTemporaryDir tempDir_;
     QFile tempFile_;
-    QFile saveFile_;
-    QByteArray readBuffer_; ///< Accumulates partial lines from stdout.
+    QByteArray readBuffer_;   ///< Accumulates partial lines from stdout.
+    QByteArray stderrBuffer_; ///< Accumulates partial lines from stderr.
+    QString lastStderrLine_;  ///< Last line adb wrote to stderr.
     qint64 lineCount_ = 0;
-    int rotationCount_ = 0;      ///< Incremented on each rotateLog() call.
-    bool usingSavePath_ = false; ///< True when writing directly to the log directory.
+    int rotationCount_ = 0;       ///< Incremented on each rotateLog() call.
+    bool usingSavePath_ = false;  ///< True when writing directly to the log directory.
+    bool createdLogFile_ = false; ///< True when start() created the log file.
+    bool stopping_ = false;       ///< True while stop() ends the process.
 };
 
 } // namespace logcat
