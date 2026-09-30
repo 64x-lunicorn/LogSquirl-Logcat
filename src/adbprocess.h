@@ -258,6 +258,12 @@ private Q_SLOTS:
     void onErrorOccurred( QProcess::ProcessError error );
 
 private:
+    /**
+     * End adb: SIGTERM on Unix, kill on Windows, then kill after a second.
+     * Waits at most two seconds; the exit is not reported as an error.
+     */
+    void endProcess();
+
     /** Write one line to the log file, terminated by "\n". */
     void writeLine( const QByteArray& line );
 

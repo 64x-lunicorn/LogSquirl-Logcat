@@ -91,6 +91,12 @@ AdbProcess::~AdbProcess()
     // finished() into it.
     blockSignals( true );
     stop();
+
+    // If stop() could not reap adb, ~QProcess kills it and waits once
+    // more, and would deliver its last output and finished() to this
+    // object's slots - after the members they use (declared after
+    // process_, so destroyed before it) are gone.
+    process_.disconnect( this );
 }
 
 // ── Static: ADB discovery ───────────────────────────────────────────────
@@ -299,6 +305,16 @@ void AdbProcess::stop()
         return;
     }
 
+    endProcess();
+    tempFile_.close();
+
+    hostLog( LOGSQUIRL_LOG_INFO, QString( "Stopped logcat for device %1 (%2 lines captured)" )
+                                     .arg( serial_ )
+                                     .arg( lineCount_ ) );
+}
+
+void AdbProcess::endProcess()
+{
     // adb exits from the signal, which QProcess reports as a crash.  That
     // is expected here and must not reach the user as an error.
     stopping_ = true;
@@ -311,15 +327,13 @@ void AdbProcess::stop()
 #endif
     if ( !process_.waitForFinished( 1000 ) ) {
         process_.kill();
-        process_.waitForFinished( 1000 );
+        if ( !process_.waitForFinished( 1000 ) ) {
+            hostLog( LOGSQUIRL_LOG_WARNING,
+                     QString( "adb for %1 did not exit when stopped." ).arg( serial_ ) );
+        }
     }
-    stopping_ = false;
-
-    tempFile_.close();
-
-    hostLog( LOGSQUIRL_LOG_INFO, QString( "Stopped logcat for device %1 (%2 lines captured)" )
-                                     .arg( serial_ )
-                                     .arg( lineCount_ ) );
+    // onFinished() clears stopping_.  If adb has not exited yet, it stays
+    // set, so that the exit, when it comes, is not reported as a crash.
 }
 
 void AdbProcess::preserveTempFile()
@@ -490,6 +504,7 @@ void AdbProcess::onFinished( int exitCode, QProcess::ExitStatus exitStatus )
         Q_EMIT errorOccurred( message );
     }
 
+    stopping_ = false;
     Q_EMIT finished( exitCode );
 }
 
