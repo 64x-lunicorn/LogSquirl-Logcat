@@ -147,6 +147,9 @@ public:
      */
     static QString configDir();
 
+    /// How long start() waits for adb to launch before giving up.
+    static constexpr int kStartTimeoutMs = 5000;
+
     // ── Instance methods ─────────────────────────────────────────────
 
     /**

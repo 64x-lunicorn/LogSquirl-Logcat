@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   return in the log file.
 - A session whose adb cannot be launched is no longer listed as active
   with nothing running: the error is shown once, no tab is opened, and
-  no empty log file is left behind.
+  no empty log file is left behind. An adb that does not start within
+  5 seconds is given up on with a message, instead of freezing LogSquirl
+  for 30 seconds and failing silently.
 - Temporary log files are now actually removed on shutdown (0.3.0's temp
   file cleanup never took effect): each stopped session reported back that
   it had ended, and handling that preserved its file; the files of a

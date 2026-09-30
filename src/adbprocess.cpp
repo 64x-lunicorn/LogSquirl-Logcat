@@ -288,8 +288,14 @@ bool AdbProcess::start()
     // reported to the caller here.  Otherwise QProcess reports it later,
     // as an error without a finished() signal, and the session would stay
     // registered with nothing running.  onErrorOccurred() has already
-    // emitted the reason.
-    if ( !process_.waitForStarted() ) {
+    // emitted the reason - except for a timeout, which QProcess only sets
+    // as error() without emitting errorOccurred().  The wait is short:
+    // it blocks the GUI.
+    if ( !process_.waitForStarted( kStartTimeoutMs ) ) {
+        if ( process_.state() != QProcess::NotRunning ) {
+            onErrorOccurred( QProcess::Timedout );
+            endProcess();
+        }
         discardLogFile();
         return false;
     }
@@ -523,7 +529,8 @@ void AdbProcess::onErrorOccurred( QProcess::ProcessError error )
         message = "ADB process failed to start.  Check that the ADB path is correct.";
         break;
     case QProcess::Timedout:
-        message = "ADB process timed out.";
+        // Only start() reports this: stop() sets stopping_ while it waits.
+        message = QString( "adb did not start within %1 s." ).arg( kStartTimeoutMs / 1000 );
         break;
     default:
         message = QString( "ADB process error (%1)." ).arg( static_cast<int>( error ) );
