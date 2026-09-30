@@ -72,13 +72,29 @@ public:
     explicit DeviceWidget( QWidget* parent = nullptr );
     ~DeviceWidget() override;
 
-    /** Stop all active logcat sessions.
-     *  @param cleanupTempFiles  If true, temporary log files are removed,
-     *         including those of earlier rotations and of sessions that
-     *         ended before (used during plugin shutdown).  If false, they are preserved
-     *         so that already-open tabs can still display the data.
+    /** What stopAll() does with the sessions' temporary log files. */
+    enum class TempFiles {
+        Keep,  ///< Keep them for the tabs that show them.
+        Remove ///< Remove them, including those of rotated and ended sessions.
+    };
+
+    /**
+     * Stop all active logcat sessions.
+     *
+     * @param tempFiles  TempFiles::Remove only when LogSquirl quits: then
+     *         the tabs showing the files close too.  When the plugin is
+     *         disabled or updated at runtime, its tabs stay open, and the
+     *         files must be kept.
      */
-    void stopAll( bool cleanupTempFiles = false );
+    void stopAll( TempFiles tempFiles = TempFiles::Keep );
+
+    /**
+     * Ask for the ADB executable path (Configure button, and Plugins →
+     * Configure), save it, and rescan the devices with it.
+     *
+     * @param parent  Parent of the input dialog.
+     */
+    void configureAdbPath( QWidget* parent );
 
     /** Number of currently running logcat sessions. */
     int activeSessionCount() const;
@@ -166,9 +182,6 @@ private Q_SLOTS:
     /** Let the user browse for a save file path. */
     void browseSavePath();
 
-    /** Open a dialog to configure the ADB executable path. */
-    void configureAdbPath();
-
     /** Handle a logcat session ending (cleanup bookkeeping). */
     void onSessionFinished( const QString& serial );
 
@@ -204,7 +217,7 @@ private:
 
     /**
      * Keep the temporary files of a session that has ended for its tabs,
-     * and remember them, so that stopAll( true ) removes them at shutdown.
+     * and remember them, so that stopAll( TempFiles::Remove ) removes them.
      */
     void keepTempFiles( AdbProcess* proc );
 

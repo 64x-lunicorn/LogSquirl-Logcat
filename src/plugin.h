@@ -60,6 +60,7 @@ struct PluginState {
     DeviceWidget* dialog = nullptr;         ///< Logcat session dialog.
     SidebarWidget* sidebarWidget = nullptr; ///< Sidebar panel for session control.
     bool initialised = false;               ///< True between init() and shutdown().
+    bool quitting = false; ///< LogSquirl is quitting (aboutToQuit), not just unloading the plugin.
 };
 
 /// Singleton plugin state.  Defined in plugin.cpp.

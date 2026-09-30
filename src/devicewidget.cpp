@@ -183,7 +183,8 @@ DeviceWidget::DeviceWidget( QWidget* parent )
     connect( stopButton_, &QPushButton::clicked, this, &DeviceWidget::stopCapture );
     connect( stopAllButton_, &QPushButton::clicked, this, &DeviceWidget::stopAllCaptures );
     connect( browseButton_, &QPushButton::clicked, this, &DeviceWidget::browseSavePath );
-    connect( adbConfigButton_, &QPushButton::clicked, this, &DeviceWidget::configureAdbPath );
+    connect( adbConfigButton_, &QPushButton::clicked, this,
+             [ this ]() { configureAdbPath( this ); } );
     connect( saveCheckBox_, &QCheckBox::toggled, savePathEdit_, &QLineEdit::setEnabled );
     connect( saveCheckBox_, &QCheckBox::toggled, browseButton_, &QPushButton::setEnabled );
     connect( deviceCombo_, &QComboBox::currentIndexChanged, this, [ this ]() { updateUiState(); } );
@@ -232,13 +233,13 @@ DeviceWidget::~DeviceWidget()
 
 // ── Public methods ──────────────────────────────────────────────────────
 
-void DeviceWidget::stopAll( bool cleanupTempFiles )
+void DeviceWidget::stopAll( TempFiles tempFiles )
 {
     const auto serials = sessions_.keys();
     for ( const auto& serial : serials ) {
         auto* proc = takeSession( serial );
         proc->stop();
-        if ( cleanupTempFiles ) {
+        if ( tempFiles == TempFiles::Remove ) {
             // Also the files of earlier rotations, which rotateSession()
             // preserved for their tabs: at shutdown the tabs go too.
             proc->removeTempFiles();
@@ -248,7 +249,7 @@ void DeviceWidget::stopAll( bool cleanupTempFiles )
         }
         proc->deleteLater();
     }
-    if ( cleanupTempFiles ) {
+    if ( tempFiles == TempFiles::Remove ) {
         // The tabs of sessions that ended before close with the host too.
         // These are the sessions' own temporary directories, never a save
         // path or the log directory.
@@ -284,7 +285,7 @@ void DeviceWidget::rotateSession( const QString& serial )
     }
 
     // The old tab keeps showing the old file, so the temporary directory
-    // must outlive this session (stopAll( true ) still removes it).
+    // must outlive this session (stopAll( TempFiles::Remove ) still removes it).
     proc->preserveTempFile();
 
     // Open the new temp file in a follow-mode tab
@@ -578,7 +579,7 @@ void DeviceWidget::updateUiState()
     adbPathLabel_->setText( adbPath.isEmpty() ? "(not found)" : adbPath );
 }
 
-void DeviceWidget::configureAdbPath()
+void DeviceWidget::configureAdbPath( QWidget* parent )
 {
     const auto configDir = AdbProcess::configDir();
     QSettings settings( configDir + "/logcat.ini", QSettings::IniFormat );
@@ -592,7 +593,7 @@ void DeviceWidget::configureAdbPath()
                                   currentPath.isEmpty() ? "(none)" : currentPath );
 
     bool ok = false;
-    const auto newPath = QInputDialog::getText( this, "Configure ADB Path", prompt,
+    const auto newPath = QInputDialog::getText( parent, "Configure ADB Path", prompt,
                                                 QLineEdit::Normal, currentPath, &ok );
 
     if ( ok ) {
@@ -610,7 +611,7 @@ AdbProcess* DeviceWidget::takeSession( const QString& serial )
     if ( proc ) {
         // The session is over as far as this widget is concerned.  Stopping
         // it emits finished(), and onSessionFinished() must not act on that:
-        // it would preserve a temp file that stopAll( true ) is cleaning up,
+        // it would preserve a temp file that stopAll() is about to remove,
         // and rescan the devices once per session.
         proc->disconnect( this );
     }

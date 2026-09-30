@@ -18,21 +18,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no empty log file is left behind. An adb that does not start within
   5 seconds is given up on with a message, instead of freezing LogSquirl
   for 30 seconds and failing silently.
-- Temporary log files are now removed on shutdown: those of the running
-  sessions and of every session that was stopped, ended or rotated away
-  before, whose tabs close with LogSquirl. 0.3.0's cleanup never took
-  effect: each session stopped at shutdown reported back that it had
-  ended, and handling that preserved its file, while the files of earlier
-  and rotated sessions were never removed at all. Save paths and files in
-  the log directory are never removed. Shutdown also rescanned the
+- Temporary log files are now removed when LogSquirl quits: those of the
+  running sessions and of every session that was stopped, ended or
+  rotated away before, whose tabs close with LogSquirl. When the plugin is
+  disabled or updated while LogSquirl keeps running, its sessions are
+  stopped but every file is kept, since open tabs may still show them.
+  0.3.0's cleanup never took effect: each session stopped at shutdown
+  reported back that it had ended, and handling that preserved its file,
+  while the files of earlier and rotated sessions were never removed at
+  all. Save paths and files in the log directory are never removed. Shutdown also rescanned the
   devices once per session, blocking it.
 - Device discovery no longer freezes LogSquirl: `adb devices` runs in the
   background instead of blocking the UI for up to 10 seconds, twice at
   startup and two or three times per Start or Stop. Starting and stopping
   a session no longer rescan at all. Refreshes requested while a scan is
   running are combined into one more scan after it, the Refresh button
-  shows "Scanning…" meanwhile, and changing the ADB path abandons a
-  running scan for one with the new path.
+  shows "Scanning…" meanwhile, and changing the ADB path (in the dialog
+  or in Plugins → Configure) abandons a running scan for one with the new
+  path.
 - On Windows, an adb that cannot be started no longer logs a false "adb
   devices timed out" 10 seconds later, and closing the dialog while a
   device scan runs kills the scan instead of leaving it to Qt.

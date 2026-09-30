@@ -48,9 +48,6 @@
 #include "sidebarwidget.h"
 
 #include <QApplication>
-#include <QFileDialog>
-#include <QInputDialog>
-#include <QSettings>
 #include <QWindow>
 
 // ── Global state ─────────────────────────────────────────────────────────
@@ -150,6 +147,7 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, 
     logcat::g_state.api = api;
     logcat::g_state.handle = handle;
     logcat::g_state.initialised = true;
+    logcat::g_state.quitting = false;
 
     api->log_message( handle, LOGSQUIRL_LOG_INFO, "Logcat plugin initialising…" );
 
@@ -160,6 +158,15 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, 
 
     // Create the DeviceWidget early so the sidebar panel can reference it.
     logcat::g_state.dialog = new logcat::DeviceWidget();
+
+    // The host shuts the plugin down both when LogSquirl quits (after
+    // aboutToQuit) and when the plugin is disabled or updated at runtime,
+    // with the tabs left open; only in the first case may the temporary
+    // files go.
+    if ( auto* app = QCoreApplication::instance() ) {
+        QObject::connect( app, &QCoreApplication::aboutToQuit, logcat::g_state.dialog,
+                          []() { logcat::g_state.quitting = true; } );
+    }
 
     // Register a sidebar tab for logcat session management
     logcat::g_state.sidebarWidget = new logcat::SidebarWidget( logcat::g_state.dialog );
@@ -188,7 +195,9 @@ LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void )
     }
 
     if ( logcat::g_state.dialog ) {
-        logcat::g_state.dialog->stopAll( true );
+        logcat::g_state.dialog->stopAll( logcat::g_state.quitting
+                                             ? logcat::DeviceWidget::TempFiles::Remove
+                                             : logcat::DeviceWidget::TempFiles::Keep );
         delete logcat::g_state.dialog;
         logcat::g_state.dialog = nullptr;
     }
@@ -204,33 +213,14 @@ LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void )
  * @param parent_widget  Cast of a QWidget* the plugin can use as dialog parent.
  *
  * Reads the current ADB path from the plugin's config directory, lets the
- * user pick a new one, and persists the choice.
+ * user pick a new one, persists the choice, and rescans the devices with it.
  */
 LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_configure( void* parent_widget )
 {
-    auto* parent = static_cast<QWidget*>( parent_widget );
-
-    // Load current setting
-    const auto configDir = logcat::AdbProcess::configDir();
-    QSettings settings( configDir + "/logcat.ini", QSettings::IniFormat );
-    const auto currentPath = settings.value( "adb/path", "" ).toString();
-
-    const auto detected = logcat::AdbProcess::findAdb();
-    const auto prompt = QString( "ADB executable path:\n\n"
-                                 "Detected: %1\nCurrent override: %2\n\n"
-                                 "Leave empty to use auto-detection." )
-                            .arg( detected.isEmpty() ? "(not found)" : detected,
-                                  currentPath.isEmpty() ? "(none)" : currentPath );
-
-    bool ok = false;
-    const auto newPath = QInputDialog::getText( parent, "Configure ADB Path", prompt,
-                                                QLineEdit::Normal, currentPath, &ok );
-
-    if ( ok ) {
-        settings.setValue( "adb/path", newPath );
-        logcat::hostLog( LOGSQUIRL_LOG_INFO,
-                         newPath.isEmpty() ? "ADB path override cleared — using auto-detection."
-                                           : "ADB path set to: " + newPath );
+    // The same as the dialog's Configure button, so that a new path is
+    // used for a device scan right away, in the dialog and the sidebar.
+    if ( logcat::g_state.dialog ) {
+        logcat::g_state.dialog->configureAdbPath( static_cast<QWidget*>( parent_widget ) );
     }
 }
 
