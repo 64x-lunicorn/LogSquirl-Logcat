@@ -60,13 +60,16 @@ inline QString installBrokenAdb( const FakeHost& host )
 
 #ifdef Q_OS_UNIX
 /**
- * Install a shell script as adb.  `adb devices` lists one device,
- * emulator-5554; `adb -s <serial> logcat` runs @p logcatScript.  The
- * default script prints two lines, then waits to be stopped.
+ * Install a shell script as adb.  `adb devices` runs @p devicesScript,
+ * which by default lists one device, emulator-5554; `adb -s <serial>
+ * logcat` runs @p logcatScript, which by default prints two lines, then
+ * waits to be stopped.
  */
-inline QString installFakeAdb( const FakeHost& host,
-                               const QByteArray& logcatScript
-                               = "printf 'first\\r\\nsecond\\n'\nexec sleep 30\n" )
+inline QString
+installFakeAdb( const FakeHost& host,
+                const QByteArray& logcatScript = "printf 'first\\r\\nsecond\\n'\nexec sleep 30\n",
+                const QByteArray& devicesScript
+                = "printf 'List of devices attached\\nemulator-5554\\tdevice\\n\\n'\n" )
 {
     const auto path = host.configDir() + "/adb";
     QFile file( path );
@@ -74,9 +77,9 @@ inline QString installFakeAdb( const FakeHost& host,
         return {};
     }
     file.write( "#!/bin/sh\n"
-                "if [ \"$1\" = devices ]; then\n"
-                "    printf 'List of devices attached\\nemulator-5554\\tdevice\\n\\n'\n"
-                "    exit 0\n"
+                "if [ \"$1\" = devices ]; then\n" );
+    file.write( devicesScript );
+    file.write( "exit 0\n"
                 "fi\n" );
     file.write( logcatScript );
     file.setPermissions( file.permissions() | QFileDevice::ExeOwner );

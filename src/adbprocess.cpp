@@ -28,8 +28,9 @@
  *      - ANDROID_HOME / ANDROID_SDK_ROOT environment variables
  *      - System PATH
  *
- *   2. discoverDevices() runs `adb devices` and parses the tabular output
- *      to extract device serials that are in the "device" state.
+ *   2. DeviceWidget runs `adb devices` in the background, and
+ *      parseDeviceList() extracts the serials of devices in the "device"
+ *      state from its tabular output.
  *
  *   3. start() launches `adb -s <serial> logcat` as a child process.
  *      Stdout is read incrementally (readyReadStandardOutput signal) and
@@ -38,7 +39,7 @@
  *   4. The host opens the temporary file with follow/tail mode, so lines
  *      appear in real-time as logcat produces output.
  *
- *   5. stop() terminates the child process gracefully.
+ *   5. stop() ends the child process.
  */
 
 #include "adbprocess.h"
@@ -163,38 +164,6 @@ QString AdbProcess::findAdb()
     }
 
     return {};
-}
-
-QStringList AdbProcess::discoverDevices()
-{
-    const auto adb = findAdb();
-    if ( adb.isEmpty() ) {
-        hostLog( LOGSQUIRL_LOG_WARNING, "adb not found — cannot discover devices." );
-        return {};
-    }
-
-    QProcess proc;
-    proc.setProgram( adb );
-    proc.setArguments( { "devices" } );
-    proc.start();
-
-    // Allow up to 10 s — the first invocation may need to start the ADB
-    // server, which can take several seconds.
-    if ( !proc.waitForFinished( 10000 ) ) {
-        hostLog( LOGSQUIRL_LOG_WARNING, "adb devices timed out." );
-        return {};
-    }
-
-    if ( proc.exitCode() != 0 ) {
-        hostLog( LOGSQUIRL_LOG_WARNING, "adb devices failed: " + proc.readAllStandardError() );
-        return {};
-    }
-
-    const auto output = proc.readAllStandardOutput();
-    const auto devices = parseDeviceList( output );
-
-    hostLog( LOGSQUIRL_LOG_INFO, QString( "Discovered %1 device(s)." ).arg( devices.size() ) );
-    return devices;
 }
 
 QStringList AdbProcess::parseDeviceList( const QByteArray& output )
@@ -333,8 +302,14 @@ void AdbProcess::stop()
     // adb exits from the signal, which QProcess reports as a crash.  That
     // is expected here and must not reach the user as an error.
     stopping_ = true;
+#ifdef Q_OS_WIN
+    // terminate() only posts WM_CLOSE, which a console program like adb
+    // never receives; waiting for it would just block the GUI.
+    process_.kill();
+#else
     process_.terminate();
-    if ( !process_.waitForFinished( 3000 ) ) {
+#endif
+    if ( !process_.waitForFinished( 1000 ) ) {
         process_.kill();
         process_.waitForFinished( 1000 );
     }

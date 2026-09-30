@@ -36,7 +36,7 @@
  *   auto* proc = new AdbProcess( "SERIAL123", "/optional/save.log", parent );
  *   if ( proc->start() )              // launches `adb -s SERIAL123 logcat`
  *       qDebug() << proc->tempFilePath(); // LogSquirl opens this file
- *   proc->stop();                     // sends SIGTERM, waits for exit
+ *   proc->stop();                     // ends adb, waits for exit
  */
 
 #pragma once
@@ -98,18 +98,11 @@ public:
     static QString findAdb();
 
     /**
-     * Run `adb devices` and return a list of attached device serials.
-     *
-     * Each entry is the first column from `adb devices` output, e.g.
-     * "emulator-5554" or "R5CR10XXXXX".  Only devices with status
-     * "device" (not "offline" or "unauthorized") are included.
-     *
-     * @return List of device serial strings, possibly empty.
-     */
-    static QStringList discoverDevices();
-
-    /**
      * Parse the raw output of `adb devices` into a list of device serials.
+     *
+     * Each entry is the first column of the output, e.g. "emulator-5554"
+     * or "R5CR10XXXXX".  Only devices with status "device" (not "offline"
+     * or "unauthorized") are included.
      *
      * Extracted as a static helper so unit tests can exercise the parsing
      * logic without running a real ADB process.
@@ -170,7 +163,11 @@ public:
      */
     bool start();
 
-    /** Stop the logcat process (SIGTERM).  No-op if not running. */
+    /**
+     * Stop the logcat process: SIGTERM on Unix, kill on Windows (where
+     * adb, a console program, ignores terminate()).  Waits at most two
+     * seconds.  No-op if not running.
+     */
     void stop();
 
     /**

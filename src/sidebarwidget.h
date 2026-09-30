@@ -73,8 +73,11 @@ public:
     explicit SidebarWidget( DeviceWidget* deviceWidget, QWidget* parent = nullptr );
 
 private Q_SLOTS:
-    /** Re-scan for ADB devices and update the combo box. */
+    /** Re-scan for ADB devices (in the background, see DeviceWidget). */
     void refreshDevices();
+
+    /** Refill the device combo box and the sessions list. */
+    void updateDeviceList();
 
     /** Start logcat for the currently selected device. */
     void startCapture();

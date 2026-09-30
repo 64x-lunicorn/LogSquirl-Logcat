@@ -110,6 +110,12 @@ inline bool waitFor( const std::function<bool()>& condition, int timeoutMs = 500
     return true;
 }
 
+/** Run the event loop for @p ms milliseconds. */
+inline void processEventsFor( int ms )
+{
+    waitFor( []() { return false; }, ms );
+}
+
 } // namespace logcat_test
 
 // Let Catch print Qt strings in failure messages.

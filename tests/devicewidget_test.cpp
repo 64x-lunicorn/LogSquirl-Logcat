@@ -32,6 +32,7 @@
 #include "fakeadb.h"
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QTemporaryDir>
@@ -227,6 +228,57 @@ SCENARIO( "stopAll decides whether temporary log files survive", "[devicewidget]
             }
 
             QDir( QFileInfo( tempFile ).absolutePath() ).removeRecursively();
+        }
+    }
+}
+#endif
+
+#ifdef Q_OS_UNIX
+SCENARIO( "devices are discovered in the background", "[devicewidget]" )
+{
+    GIVEN( "an adb whose device scan takes a while" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb(
+            host, "exec sleep 30\n",
+            "sleep 1\nprintf 'List of devices attached\\nemulator-5554\\tdevice\\n\\n'\n" );
+
+        WHEN( "the widget is created, which scans for devices" )
+        {
+            QElapsedTimer timer;
+            timer.start();
+            DeviceWidget widget;
+            const auto constructionMs = timer.elapsed();
+
+            int changes = 0;
+            QObject::connect( &widget, &DeviceWidget::devicesChanged,
+                              [ &changes ]() { ++changes; } );
+
+            THEN( "creating it does not wait for the scan" )
+            {
+                REQUIRE( constructionMs < 500 );
+                REQUIRE( widget.devices().isEmpty() );
+            }
+
+            THEN( "the devices arrive when the scan completes" )
+            {
+                REQUIRE( waitFor( [ &changes ]() { return changes == 1; } ) );
+                REQUIRE( widget.devices() == QStringList{ "emulator-5554" } );
+            }
+
+            AND_WHEN( "more refreshes are requested while the scan runs" )
+            {
+                widget.refreshDevices();
+                widget.refreshDevices();
+
+                THEN( "they are folded into the running scan" )
+                {
+                    REQUIRE( waitFor( [ &changes ]() { return changes == 1; } ) );
+                    logcat_test::processEventsFor( 1500 ); // time for a second scan
+                    REQUIRE( changes == 1 );
+                    REQUIRE( host.logs.filter( "Discovered" ).size() == 1 );
+                }
+            }
         }
     }
 }

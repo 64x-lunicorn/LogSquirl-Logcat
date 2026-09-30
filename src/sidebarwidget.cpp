@@ -141,6 +141,7 @@ SidebarWidget::SidebarWidget( DeviceWidget* deviceWidget, QWidget* parent )
     } );
     connect( logDirEdit_, &QLineEdit::editingFinished, this, &SidebarWidget::saveLogDir );
     connect( deviceCombo_, &QComboBox::currentIndexChanged, this, [ this ]() { updateUiState(); } );
+    connect( deviceWidget_, &DeviceWidget::devicesChanged, this, &SidebarWidget::updateDeviceList );
 
     // Periodic refresh of line counts in the session list (every 1 second)
     refreshTimer_ = new QTimer( this );
@@ -148,20 +149,25 @@ SidebarWidget::SidebarWidget( DeviceWidget* deviceWidget, QWidget* parent )
     connect( refreshTimer_, &QTimer::timeout, this, &SidebarWidget::refreshSessionList );
     refreshTimer_->start();
 
-    // Initial populate
+    // Initial populate.  DeviceWidget has started the first device scan;
+    // devicesChanged() fills in the result.
     loadLogDir();
-    refreshDevices();
-    updateUiState();
+    updateDeviceList();
 }
 
 // ── Private slots ───────────────────────────────────────────────────────
 
 void SidebarWidget::refreshDevices()
 {
+    deviceWidget_->refreshDevices();
+}
+
+void SidebarWidget::updateDeviceList()
+{
     const auto currentSelection = currentSerial();
     deviceCombo_->clear();
 
-    const auto devices = AdbProcess::discoverDevices();
+    const auto& devices = deviceWidget_->devices();
     if ( devices.isEmpty() ) {
         deviceCombo_->addItem( "(no devices)" );
         deviceCombo_->setEnabled( false );
@@ -196,7 +202,7 @@ void SidebarWidget::startCapture()
 
     const auto savePath = generateSavePath( serial );
     deviceWidget_->startSession( serial, savePath );
-    refreshDevices();
+    updateDeviceList();
 }
 
 void SidebarWidget::stopSelectedCapture()
@@ -207,7 +213,7 @@ void SidebarWidget::stopSelectedCapture()
     }
 
     deviceWidget_->stopSession( serial );
-    refreshDevices();
+    updateDeviceList();
 }
 
 void SidebarWidget::stopAllCaptures()
@@ -216,7 +222,7 @@ void SidebarWidget::stopAllCaptures()
 
     hostNotify( "All logcat sessions stopped." );
 
-    refreshDevices();
+    updateDeviceList();
 }
 
 void SidebarWidget::refreshSessionList()
@@ -265,12 +271,12 @@ void SidebarWidget::rebuildSessionList()
 
         connect( rotateBtn, &QPushButton::clicked, this, [ this, serial ]() {
             deviceWidget_->rotateSession( serial );
-            refreshDevices();
+            updateDeviceList();
         } );
 
         connect( stopBtn, &QPushButton::clicked, this, [ this, serial ]() {
             deviceWidget_->stopSession( serial );
-            refreshDevices();
+            updateDeviceList();
         } );
 
         // Replace the plain text item with the custom widget

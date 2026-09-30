@@ -25,7 +25,7 @@
  * It provides:
  *
  *   - A combo box listing discovered ADB devices
- *   - A "Refresh" button to re-scan for devices
+ *   - A "Refresh" button to re-scan for devices (in the background)
  *   - A "Start" button to begin logcat capture for the selected device
  *   - A "Stop" button to end the active session for the selected device
  *   - A "Stop All" button (shown when multiple sessions are active)
@@ -53,7 +53,9 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMap>
+#include <QProcess>
 #include <QPushButton>
+#include <QTimer>
 
 namespace logcat {
 
@@ -68,7 +70,7 @@ class DeviceWidget : public QDialog {
 
 public:
     explicit DeviceWidget( QWidget* parent = nullptr );
-    ~DeviceWidget() override = default;
+    ~DeviceWidget() override;
 
     /** Stop all active logcat sessions.
      *  @param cleanupTempFiles  If true, temporary log files are removed
@@ -121,9 +123,28 @@ public:
      */
     bool isSessionActive( const QString& serial ) const;
 
-private Q_SLOTS:
-    /** Re-scan for ADB devices and update the combo box. */
+    /** Serials of the devices found by the most recent scan. */
+    const QStringList& devices() const
+    {
+        return devices_;
+    }
+
+public Q_SLOTS:
+    /**
+     * Re-scan for ADB devices.  `adb devices` runs in the background
+     * (starting the ADB server can take seconds); devicesChanged() is
+     * emitted when it has finished.  While a scan is running, further
+     * requests are folded into it.
+     */
     void refreshDevices();
+
+Q_SIGNALS:
+    /** Emitted when a device scan has finished and devices() is updated. */
+    void devicesChanged();
+
+private Q_SLOTS:
+    /** Take the result of a finished `adb devices` scan. */
+    void onScanFinished( int exitCode, QProcess::ExitStatus exitStatus );
 
     /** Start logcat for the currently selected device. */
     void startCapture();
@@ -149,6 +170,12 @@ private Q_SLOTS:
 private:
     /** Update UI state (button enable/disable, status label, ADB path). */
     void updateUiState();
+
+    /** Refill the device combo box from devices(), marking active sessions. */
+    void updateDeviceCombo();
+
+    /** Store the result of a scan and announce it. */
+    void setDevices( const QStringList& devices );
 
     /** Return the serial of the currently selected device, or empty string. */
     QString currentSerial() const;
@@ -176,6 +203,11 @@ private:
     QLabel* adbPathLabel_ = nullptr;
     QPushButton* adbConfigButton_ = nullptr;
     QLabel* statusLabel_ = nullptr;
+
+    // ── Device discovery ─────────────────────────────────────────────
+    QProcess* scanProcess_ = nullptr; ///< Runs `adb devices`.
+    QTimer* scanTimeout_ = nullptr;   ///< Gives up on a hanging scan.
+    QStringList devices_;             ///< Result of the last scan.
 
     // ── Active sessions (serial → AdbProcess*) ──────────────────────
     QMap<QString, AdbProcess*> sessions_;

@@ -151,9 +151,40 @@ DeviceWidget::DeviceWidget( QWidget* parent )
     connect( saveCheckBox_, &QCheckBox::toggled, browseButton_, &QPushButton::setEnabled );
     connect( deviceCombo_, &QComboBox::currentIndexChanged, this, [ this ]() { updateUiState(); } );
 
+    // ── Device discovery ─────────────────────────────────────────────
+    scanProcess_ = new QProcess( this );
+    connect( scanProcess_, &QProcess::finished, this, &DeviceWidget::onScanFinished );
+    connect( scanProcess_, &QProcess::errorOccurred, this,
+             [ this ]( QProcess::ProcessError error ) {
+                 // No finished() follows a failed start
+                 if ( error == QProcess::FailedToStart ) {
+                     scanTimeout_->stop();
+                     hostLog( LOGSQUIRL_LOG_WARNING,
+                              "adb devices could not be started: " + scanProcess_->errorString() );
+                     setDevices( {} );
+                 }
+             } );
+
+    // The first scan may need to start the ADB server, which can take
+    // several seconds; give up after 10.
+    scanTimeout_ = new QTimer( this );
+    scanTimeout_->setSingleShot( true );
+    scanTimeout_->setInterval( 10000 );
+    connect( scanTimeout_, &QTimer::timeout, this, [ this ]() {
+        hostLog( LOGSQUIRL_LOG_WARNING, "adb devices timed out." );
+        scanProcess_->kill();
+    } );
+
     // Initial device scan
+    updateDeviceCombo();
     refreshDevices();
-    updateUiState();
+}
+
+DeviceWidget::~DeviceWidget()
+{
+    // ~QProcess waits for a running scan and emits finished() - by then
+    // this widget is half-destroyed.
+    scanProcess_->disconnect( this );
 }
 
 // ── Public methods ──────────────────────────────────────────────────────
@@ -169,7 +200,7 @@ void DeviceWidget::stopAll( bool cleanupTempFiles )
         }
         proc->deleteLater();
     }
-    updateUiState();
+    updateDeviceCombo();
 }
 
 int DeviceWidget::activeSessionCount() const
@@ -244,7 +275,7 @@ bool DeviceWidget::startSession( const QString& serial, const QString& savePath 
     }
     hostNotify( QString( "Logcat started for %1" ).arg( serial ) );
 
-    refreshDevices(); // Update combo box markers
+    updateDeviceCombo(); // Update combo box markers
     return true;
 }
 
@@ -262,7 +293,7 @@ void DeviceWidget::stopSession( const QString& serial )
         QString( "Logcat stopped for %1 (%2 lines)" ).arg( serial ).arg( proc->lineCount() ) );
 
     proc->deleteLater();
-    refreshDevices();
+    updateDeviceCombo();
 }
 
 qint64 DeviceWidget::sessionLineCount( const QString& serial ) const
@@ -280,17 +311,63 @@ bool DeviceWidget::isSessionActive( const QString& serial ) const
 
 void DeviceWidget::refreshDevices()
 {
+    if ( scanProcess_->state() != QProcess::NotRunning ) {
+        return; // the running scan will report shortly
+    }
+
+    const auto adb = AdbProcess::findAdb();
+    if ( adb.isEmpty() ) {
+        hostLog( LOGSQUIRL_LOG_WARNING, "adb not found — cannot discover devices." );
+        setDevices( {} );
+        return;
+    }
+
+    scanProcess_->setProgram( adb );
+    scanProcess_->setArguments( { "devices" } );
+    scanProcess_->start();
+    scanTimeout_->start();
+}
+
+void DeviceWidget::onScanFinished( int exitCode, QProcess::ExitStatus exitStatus )
+{
+    scanTimeout_->stop();
+
+    QStringList found;
+    if ( exitStatus == QProcess::CrashExit ) {
+        // Killed after the timeout, which has been logged already
+    }
+    else if ( exitCode != 0 ) {
+        hostLog( LOGSQUIRL_LOG_WARNING,
+                 "adb devices failed: "
+                     + QString::fromUtf8( scanProcess_->readAllStandardError() ).trimmed() );
+    }
+    else {
+        found = AdbProcess::parseDeviceList( scanProcess_->readAllStandardOutput() );
+        hostLog( LOGSQUIRL_LOG_INFO, QString( "Discovered %1 device(s)." ).arg( found.size() ) );
+    }
+
+    setDevices( found );
+}
+
+void DeviceWidget::setDevices( const QStringList& devices )
+{
+    devices_ = devices;
+    updateDeviceCombo();
+    Q_EMIT devicesChanged();
+}
+
+void DeviceWidget::updateDeviceCombo()
+{
     const auto currentSelection = currentSerial();
     deviceCombo_->clear();
 
-    const auto devices = AdbProcess::discoverDevices();
-    if ( devices.isEmpty() ) {
+    if ( devices_.isEmpty() ) {
         deviceCombo_->addItem( "(no devices)" );
         deviceCombo_->setEnabled( false );
     }
     else {
         deviceCombo_->setEnabled( true );
-        for ( const auto& serial : devices ) {
+        for ( const auto& serial : devices_ ) {
             // Mark devices that already have an active session
             if ( sessions_.contains( serial ) ) {
                 deviceCombo_->addItem( serial + " ●", serial );
@@ -342,7 +419,7 @@ void DeviceWidget::stopAllCaptures()
 
     hostNotify( "All logcat sessions stopped." );
 
-    refreshDevices();
+    updateDeviceCombo();
 }
 
 void DeviceWidget::browseSavePath()
@@ -371,6 +448,7 @@ void DeviceWidget::onSessionFinished( const QString& serial )
 
     hostLog( LOGSQUIRL_LOG_INFO, QString( "Logcat session for %1 ended." ).arg( serial ) );
 
+    // adb exits when its device goes away; find out whether it did
     refreshDevices();
 }
 

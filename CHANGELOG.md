@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file cleanup never took effect): each stopped session reported back that
   it had ended, and handling that preserved its file. It also rescanned
   the devices once per session, blocking the shutdown.
+- Device discovery no longer freezes LogSquirl: `adb devices` runs in the
+  background instead of blocking the UI for up to 10 seconds, twice at
+  startup and two or three times per Start or Stop. Starting and stopping
+  a session no longer rescan at all, and refreshes requested while a scan
+  is running share its result.
+- Stopping a session on Windows no longer freezes LogSquirl for three
+  seconds: adb is killed right away, since as a console program it ignores
+  the polite request to close.
 - adb's stderr is no longer discarded: its warnings go to the LogSquirl
   log, and when adb exits with an error (device offline, not found,
   unauthorised) the notification says what adb reported.
