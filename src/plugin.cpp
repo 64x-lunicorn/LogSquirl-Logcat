@@ -46,6 +46,7 @@
 #include "adbprocess.h"
 #include "devicewidget.h"
 #include "sidebarwidget.h"
+#include "tempdirs.h"
 
 #include <QApplication>
 #include <QWindow>
@@ -151,6 +152,10 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, 
 
     api->log_message( handle, LOGSQUIRL_LOG_INFO, "Logcat plugin initialising…" );
 
+    // Files of LogSquirl processes that ended without removing them,
+    // e.g. after a crash: no tab can show them any more.
+    logcat::removeStaleTempDirs( logcat::tempRoot() );
+
     // Add "Android Logcat" to the Plugins menu.  When clicked it opens a
     // non-modal dialog for device selection and session management.
     api->register_menu_action( handle, "Plugins", "Android Logcat\u2026", &showLogcatDialog,
@@ -195,11 +200,17 @@ LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void )
     }
 
     if ( logcat::g_state.dialog ) {
-        logcat::g_state.dialog->stopAll( logcat::g_state.quitting
-                                             ? logcat::DeviceWidget::TempFiles::Remove
-                                             : logcat::DeviceWidget::TempFiles::Keep );
+        logcat::g_state.dialog->stopAll();
         delete logcat::g_state.dialog;
         logcat::g_state.dialog = nullptr;
+    }
+
+    // The tabs close with LogSquirl: remove the files of every instance of
+    // the plugin in this process, also those of instances before a runtime
+    // disable or update, which only the directory names remember.  Save
+    // paths and the log directory are never touched.
+    if ( logcat::g_state.quitting ) {
+        logcat::removeOwnTempDirs( logcat::tempRoot() );
     }
 
     logcat::g_state.api = nullptr;

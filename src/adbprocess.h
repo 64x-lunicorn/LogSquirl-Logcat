@@ -56,7 +56,8 @@ namespace logcat {
  *
  * Captures stdout line-by-line and writes each line to:
  *   - The user-configured log directory file, when savePath is non-empty.
- *   - A temporary file inside a QTemporaryDir, when savePath is empty.
+ *   - A temporary file inside a QTemporaryDir, when savePath is empty,
+ *     named after the process (see tempdirs.h).
  *
  * When a savePath is provided the temporary directory is not used,
  * avoiding orphaned temp files that fill up disk space.
@@ -182,14 +183,6 @@ public:
      *         session writes to a save path (nothing to preserve).
      */
     QString preserveTempFile();
-
-    /**
-     * Remove the temporary directory now, with the files of every rotation
-     * of this session, even if preserveTempFile() has been called.  For
-     * plugin shutdown, when no tab outlives the host.  Call after stop().
-     * A save path is not in the temporary directory and is kept.
-     */
-    void removeTempFiles();
 
     /**
      * Rotate the log file: close the current temp file and open a new

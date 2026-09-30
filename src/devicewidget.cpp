@@ -55,8 +55,6 @@
 #include <QSignalBlocker>
 #include <QVBoxLayout>
 
-#include <utility>
-
 namespace logcat {
 
 namespace {
@@ -233,30 +231,14 @@ DeviceWidget::~DeviceWidget()
 
 // ── Public methods ──────────────────────────────────────────────────────
 
-void DeviceWidget::stopAll( TempFiles tempFiles )
+void DeviceWidget::stopAll()
 {
     const auto serials = sessions_.keys();
     for ( const auto& serial : serials ) {
         auto* proc = takeSession( serial );
         proc->stop();
-        if ( tempFiles == TempFiles::Remove ) {
-            // Also the files of earlier rotations, which rotateSession()
-            // preserved for their tabs: at shutdown the tabs go too.
-            proc->removeTempFiles();
-        }
-        else {
-            keepTempFiles( proc );
-        }
+        proc->preserveTempFile();
         proc->deleteLater();
-    }
-    if ( tempFiles == TempFiles::Remove ) {
-        // The tabs of sessions that ended before close with the host too.
-        // These are the sessions' own temporary directories, never a save
-        // path or the log directory.
-        for ( const auto& dir : std::as_const( endedTempDirs_ ) ) {
-            QDir( dir ).removeRecursively();
-        }
-        endedTempDirs_.clear();
     }
     updateDeviceCombo();
 }
@@ -285,7 +267,7 @@ void DeviceWidget::rotateSession( const QString& serial )
     }
 
     // The old tab keeps showing the old file, so the temporary directory
-    // must outlive this session (stopAll( TempFiles::Remove ) still removes it).
+    // must outlive this session (until LogSquirl quits, see tempdirs.h).
     proc->preserveTempFile();
 
     // Open the new temp file in a follow-mode tab
@@ -346,7 +328,7 @@ void DeviceWidget::stopSession( const QString& serial )
     }
 
     proc->stop();
-    keepTempFiles( proc );
+    proc->preserveTempFile();
 
     hostNotify(
         QString( "Logcat stopped for %1 (%2 lines)" ).arg( serial ).arg( proc->lineCount() ) );
@@ -537,7 +519,7 @@ void DeviceWidget::onSessionFinished( const QString& serial )
 
     // Preserve the temp file so the LogSquirl tab keeps its content.
     // When using a save path the file is already persistent.
-    keepTempFiles( proc );
+    proc->preserveTempFile();
     proc->deleteLater();
 
     hostLog( LOGSQUIRL_LOG_INFO, QString( "Logcat session for %1 ended." ).arg( serial ) );
@@ -611,19 +593,11 @@ AdbProcess* DeviceWidget::takeSession( const QString& serial )
     if ( proc ) {
         // The session is over as far as this widget is concerned.  Stopping
         // it emits finished(), and onSessionFinished() must not act on that:
-        // it would preserve a temp file that stopAll() is about to remove,
-        // and rescan the devices once per session.
+        // it would end the session a second time, and rescan the devices
+        // once per session.
         proc->disconnect( this );
     }
     return proc;
-}
-
-void DeviceWidget::keepTempFiles( AdbProcess* proc )
-{
-    const auto dir = proc->preserveTempFile();
-    if ( !dir.isEmpty() && !endedTempDirs_.contains( dir ) ) {
-        endedTempDirs_.append( dir );
-    }
 }
 
 bool DeviceWidget::isFileInUse( const QString& path ) const

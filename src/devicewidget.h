@@ -72,21 +72,14 @@ public:
     explicit DeviceWidget( QWidget* parent = nullptr );
     ~DeviceWidget() override;
 
-    /** What stopAll() does with the sessions' temporary log files. */
-    enum class TempFiles {
-        Keep,  ///< Keep them for the tabs that show them.
-        Remove ///< Remove them, including those of rotated and ended sessions.
-    };
-
     /**
      * Stop all active logcat sessions.
      *
-     * @param tempFiles  TempFiles::Remove only when LogSquirl quits: then
-     *         the tabs showing the files close too.  When the plugin is
-     *         disabled or updated at runtime, its tabs stay open, and the
-     *         files must be kept.
+     * Their temporary log files are kept for the tabs that show them, also
+     * when the plugin is disabled or updated at runtime.  The plugin removes
+     * them when LogSquirl quits (see tempdirs.h).
      */
-    void stopAll( TempFiles tempFiles = TempFiles::Keep );
+    void stopAll();
 
     /**
      * Ask for the ADB executable path (Configure button, and Plugins →
@@ -215,12 +208,6 @@ private:
      */
     AdbProcess* takeSession( const QString& serial );
 
-    /**
-     * Keep the temporary files of a session that has ended for its tabs,
-     * and remember them, so that stopAll( TempFiles::Remove ) removes them.
-     */
-    void keepTempFiles( AdbProcess* proc );
-
     /** Whether an active session writes to the file at @p path. */
     bool isFileInUse( const QString& path ) const;
 
@@ -245,9 +232,6 @@ private:
 
     // ── Active sessions (serial → AdbProcess*) ──────────────────────
     QMap<QString, AdbProcess*> sessions_;
-
-    /// Temporary directories of ended sessions, kept for their tabs until shutdown.
-    QStringList endedTempDirs_;
 };
 
 } // namespace logcat

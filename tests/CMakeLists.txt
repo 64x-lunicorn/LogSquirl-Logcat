@@ -52,6 +52,7 @@ target_sources(logsquirl_logcat_tests
     PRIVATE
         "${CMAKE_SOURCE_DIR}/src/plugin.cpp"
         "${CMAKE_SOURCE_DIR}/src/adbprocess.cpp"
+        "${CMAKE_SOURCE_DIR}/src/tempdirs.cpp"
         "${CMAKE_SOURCE_DIR}/src/devicewidget.cpp"
         "${CMAKE_SOURCE_DIR}/src/sidebarwidget.cpp"
 )

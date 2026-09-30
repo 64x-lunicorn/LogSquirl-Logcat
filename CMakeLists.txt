@@ -38,6 +38,7 @@ qt_standard_project_setup()
 add_library(logsquirl_logcat SHARED
     src/plugin.cpp
     src/adbprocess.cpp
+    src/tempdirs.cpp
     src/devicewidget.cpp
     src/sidebarwidget.cpp
 )

@@ -23,8 +23,9 @@
  *
  * A FakeHost installs itself into g_state for its lifetime: the plugin
  * gets a private, empty config directory (so tests never read or write
- * a real logcat.ini), and every log message, notification, open_file()
- * request and menu entry is recorded for the test to inspect.
+ * a real logcat.ini) and a private temporary root, and every log message,
+ * notification, open_file() request and menu entry is recorded for the
+ * test to inspect.
  */
 
 #pragma once
@@ -84,12 +85,14 @@ public:
 
         logcat::g_state.api = &api_;
         logcat::g_state.handle = this;
+        logcat::g_state.tempRoot = tempRoot_.path();
     }
 
     ~FakeHost()
     {
         logcat::g_state.api = nullptr;
         logcat::g_state.handle = nullptr;
+        logcat::g_state.tempRoot.clear();
     }
 
     FakeHost( const FakeHost& ) = delete;
@@ -99,6 +102,12 @@ public:
     QString configDir() const
     {
         return configDir_.path();
+    }
+
+    /** The plugin's temporary root, private to this host. */
+    QString tempRoot() const
+    {
+        return tempRoot_.path();
     }
 
     QStringList logs;
@@ -113,6 +122,7 @@ private:
     }
 
     QTemporaryDir configDir_;
+    QTemporaryDir tempRoot_;
     QByteArray configDirUtf8_;
     LogSquirlHostApi api_{};
 };
