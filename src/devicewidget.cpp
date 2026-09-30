@@ -44,6 +44,7 @@
 #include "devicewidget.h"
 #include "plugin.h"
 
+#include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGroupBox>
@@ -54,6 +55,34 @@
 #include <QVBoxLayout>
 
 namespace logcat {
+
+namespace {
+
+/**
+ * Whether @p a and @p b name the same file.  Existing files are compared
+ * by their canonical path (resolving symlinks); otherwise the cleaned
+ * absolute paths are compared.  QFileInfo's own operator== cannot be
+ * used: two files that do not exist both have an empty canonical path,
+ * and compare equal.
+ */
+bool isSameFile( const QString& a, const QString& b )
+{
+    const QFileInfo fileA( a );
+    const QFileInfo fileB( b );
+    if ( fileA.exists() && fileB.exists() ) {
+        return fileA.canonicalFilePath() == fileB.canonicalFilePath();
+    }
+#if defined( Q_OS_WIN ) || defined( Q_OS_MACOS )
+    constexpr auto sensitivity = Qt::CaseInsensitive;
+#else
+    constexpr auto sensitivity = Qt::CaseSensitive;
+#endif
+    return QDir::cleanPath( fileA.absoluteFilePath() )
+               .compare( QDir::cleanPath( fileB.absoluteFilePath() ), sensitivity )
+           == 0;
+}
+
+} // namespace
 
 // ── Construction ────────────────────────────────────────────────────────
 
@@ -535,9 +564,8 @@ AdbProcess* DeviceWidget::takeSession( const QString& serial )
 
 bool DeviceWidget::isFileInUse( const QString& path ) const
 {
-    const QFileInfo file( path );
     for ( const auto* proc : sessions_ ) {
-        if ( QFileInfo( proc->tempFilePath() ) == file ) {
+        if ( isSameFile( proc->tempFilePath(), path ) ) {
             return true;
         }
     }

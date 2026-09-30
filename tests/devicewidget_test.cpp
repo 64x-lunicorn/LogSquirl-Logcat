@@ -256,6 +256,42 @@ SCENARIO( "two sessions never write to the same file", "[devicewidget]" )
 
         widget.stopAll();
     }
+
+    GIVEN( "a session whose save file has been deleted while it runs" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        DeviceWidget widget;
+        QTemporaryDir logDir;
+        const auto savePath = logDir.filePath( "capture.log" );
+        REQUIRE( widget.startSession( "emulator-5554", savePath ) );
+        REQUIRE( QFile::remove( savePath ) );
+
+        WHEN( "starting a second device with a different, new save path" )
+        {
+            const auto started
+                = widget.startSession( "emulator-5556", logDir.filePath( "other.log" ) );
+
+            THEN( "it is accepted: two missing files are not the same file" )
+            {
+                REQUIRE( started );
+                REQUIRE( widget.isSessionActive( "emulator-5556" ) );
+            }
+        }
+
+        WHEN( "starting a second device with the same save path, spelled differently" )
+        {
+            const auto started
+                = widget.startSession( "emulator-5556", logDir.path() + "/sub/../capture.log" );
+
+            THEN( "it is still refused" )
+            {
+                REQUIRE_FALSE( started );
+            }
+        }
+
+        widget.stopAll();
+    }
 }
 #endif
 
