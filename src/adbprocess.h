@@ -232,12 +232,19 @@ Q_SIGNALS:
     /** Emitted when the logcat process exits (normally or on error). */
     void finished( int exitCode );
 
-    /** Emitted when an error occurs (ADB not found, process crash, …). */
+    /**
+     * Emitted when an error occurs (ADB not found, process crash, adb
+     * exiting with an error, …).  Not emitted for the exit that stop()
+     * causes.
+     */
     void errorOccurred( const QString& message );
 
 private Q_SLOTS:
     /** Handle new data available on stdout. */
     void onReadyRead();
+
+    /** Forward adb's stderr to the host log. */
+    void onReadyReadStandardError();
 
     /** Handle process exit. */
     void onFinished( int exitCode, QProcess::ExitStatus exitStatus );
@@ -261,7 +268,9 @@ private:
     QProcess process_;
     QTemporaryDir tempDir_;
     QFile tempFile_;
-    QByteArray readBuffer_; ///< Accumulates partial lines from stdout.
+    QByteArray readBuffer_;   ///< Accumulates partial lines from stdout.
+    QByteArray stderrBuffer_; ///< Accumulates partial lines from stderr.
+    QString lastStderrLine_;  ///< Last line adb wrote to stderr.
     qint64 lineCount_ = 0;
     int rotationCount_ = 0;       ///< Incremented on each rotateLog() call.
     bool usingSavePath_ = false;  ///< True when writing directly to the log directory.

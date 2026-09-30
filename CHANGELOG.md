@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file cleanup never took effect): each stopped session reported back that
   it had ended, and handling that preserved its file. It also rescanned
   the devices once per session, blocking the shutdown.
+- adb's stderr is no longer discarded: its warnings go to the LogSquirl
+  log, and when adb exits with an error (device offline, not found,
+  unauthorised) the notification says what adb reported.
 - Deleting the dialog with sessions still running no longer calls back
   into the half-destroyed dialog.
 - Stopping a session no longer shows an "ADB process crashed" error on

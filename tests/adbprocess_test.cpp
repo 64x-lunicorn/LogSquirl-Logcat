@@ -439,3 +439,59 @@ SCENARIO( "destroying a running session does not call back its owner", "[adbproc
     }
 }
 #endif
+
+#ifdef Q_OS_UNIX
+SCENARIO( "adb's stderr reaches the user", "[adbprocess]" )
+{
+    GIVEN( "an adb that warns on stderr while it runs" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host, "echo 'adb: warning: slow device' >&2\n"
+                                           "printf 'first\\n'\n"
+                                           "exec sleep 30\n" );
+        QStringList errors;
+        AdbProcess proc( "emulator-5554" );
+        QObject::connect( &proc, &AdbProcess::errorOccurred,
+                          [ &errors ]( const QString& message ) { errors << message; } );
+
+        WHEN( "the session runs" )
+        {
+            REQUIRE( proc.start() );
+
+            THEN( "the warning is forwarded to the host log, not shown as an error" )
+            {
+                REQUIRE( waitFor( [ &host ]() {
+                    return !host.logs.filter( "adb: warning: slow device" ).isEmpty();
+                } ) );
+                REQUIRE( errors.isEmpty() );
+            }
+        }
+    }
+
+    GIVEN( "an adb that fails with a message on stderr" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host, "echo \"error: device 'emulator-5554' not found\" >&2\n"
+                                           "exit 1\n" );
+        QStringList errors;
+        int finishedCount = 0;
+        AdbProcess proc( "emulator-5554" );
+        QObject::connect( &proc, &AdbProcess::errorOccurred,
+                          [ &errors ]( const QString& message ) { errors << message; } );
+        QObject::connect( &proc, &AdbProcess::finished,
+                          [ &finishedCount ]( int ) { ++finishedCount; } );
+
+        WHEN( "the session runs" )
+        {
+            REQUIRE( proc.start() );
+            REQUIRE( waitFor( [ &finishedCount ]() { return finishedCount == 1; } ) );
+
+            THEN( "one error tells the user what adb said" )
+            {
+                REQUIRE( errors.size() == 1 );
+                REQUIRE( errors.first().contains( "device 'emulator-5554' not found" ) );
+            }
+        }
+    }
+}
+#endif

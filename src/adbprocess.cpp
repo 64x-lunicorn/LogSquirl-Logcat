@@ -76,6 +76,8 @@ AdbProcess::AdbProcess( const QString& serial, const QString& savePath, QObject*
 {
     // Connect QProcess signals to our slots
     connect( &process_, &QProcess::readyReadStandardOutput, this, &AdbProcess::onReadyRead );
+    connect( &process_, &QProcess::readyReadStandardError, this,
+             &AdbProcess::onReadyReadStandardError );
     connect( &process_, QOverload<int, QProcess::ExitStatus>::of( &QProcess::finished ), this,
              &AdbProcess::onFinished );
     connect( &process_, &QProcess::errorOccurred, this, &AdbProcess::onErrorOccurred );
@@ -300,6 +302,8 @@ bool AdbProcess::start()
 
     lineCount_ = 0;
     readBuffer_.clear();
+    stderrBuffer_.clear();
+    lastStderrLine_.clear();
 
     process_.setProgram( adb );
     process_.setArguments( { "-s", serial_, "logcat" } );
@@ -465,6 +469,21 @@ void AdbProcess::onReadyRead()
     tempFile_.flush();
 }
 
+void AdbProcess::onReadyReadStandardError()
+{
+    // adb reports problems (device offline, unauthorised, server restarts)
+    // on stderr.  Pass them on to the host log; the last one explains an
+    // unexpected exit in onFinished().
+    stderrBuffer_.append( process_.readAllStandardError() );
+    for ( const auto& line : takeLines( stderrBuffer_ ) ) {
+        const auto text = QString::fromUtf8( line ).trimmed();
+        if ( !text.isEmpty() ) {
+            lastStderrLine_ = text;
+            hostLog( LOGSQUIRL_LOG_WARNING, QString( "adb (%1): %2" ).arg( serial_, text ) );
+        }
+    }
+}
+
 void AdbProcess::onFinished( int exitCode, QProcess::ExitStatus exitStatus )
 {
     // Flush any remaining partial line in the buffer
@@ -472,9 +491,23 @@ void AdbProcess::onFinished( int exitCode, QProcess::ExitStatus exitStatus )
 
     tempFile_.close();
 
-    if ( exitStatus == QProcess::CrashExit && !stopping_ ) {
-        hostLog( LOGSQUIRL_LOG_WARNING,
-                 QString( "Logcat process for %1 crashed." ).arg( serial_ ) );
+    // Collect what adb wrote to stderr just before it exited, including a
+    // last line without a terminator
+    onReadyReadStandardError();
+    if ( !stderrBuffer_.isEmpty() ) {
+        stderrBuffer_.append( '\n' );
+        onReadyReadStandardError();
+    }
+
+    if ( !stopping_ && ( exitStatus == QProcess::CrashExit || exitCode != 0 ) ) {
+        auto message
+            = exitStatus == QProcess::CrashExit
+                  ? QString( "ADB process for %1 crashed." ).arg( serial_ )
+                  : QString( "adb for %1 exited with code %2." ).arg( serial_ ).arg( exitCode );
+        if ( !lastStderrLine_.isEmpty() ) {
+            message += " " + lastStderrLine_;
+        }
+        Q_EMIT errorOccurred( message );
     }
 
     Q_EMIT finished( exitCode );
@@ -482,7 +515,10 @@ void AdbProcess::onFinished( int exitCode, QProcess::ExitStatus exitStatus )
 
 void AdbProcess::onErrorOccurred( QProcess::ProcessError error )
 {
-    if ( stopping_ ) {
+    // A crash is followed by finished(); onFinished() reports it together
+    // with what adb last wrote to stderr.  While stop() ends the process,
+    // the "crash" is expected.
+    if ( error == QProcess::Crashed || stopping_ ) {
         return;
     }
 
@@ -490,9 +526,6 @@ void AdbProcess::onErrorOccurred( QProcess::ProcessError error )
     switch ( error ) {
     case QProcess::FailedToStart:
         message = "ADB process failed to start.  Check that the ADB path is correct.";
-        break;
-    case QProcess::Crashed:
-        message = QString( "ADB process for %1 crashed." ).arg( serial_ );
         break;
     case QProcess::Timedout:
         message = "ADB process timed out.";
