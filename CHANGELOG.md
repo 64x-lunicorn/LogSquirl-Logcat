@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-09-30
+
+### Changed
+- **Requires LogSquirl 26.10.0 or later.** This release is built with the Qt of
+  LogSquirl 26.10.0 (Qt 6.11.3); an older LogSquirl cannot load it.
+
 ### Fixed
 - Log messages and notifications reach LogSquirl as UTF-8, so non-ASCII
   device names and paths are no longer garbled on systems whose local
@@ -125,6 +131,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Documentation** — README with Mermaid architecture diagrams, developer
   guide for the Plugin SDK.
 
-[Unreleased]: https://github.com/64x-lunicorn/LogSquirl-Logcat/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/64x-lunicorn/LogSquirl-Logcat/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/64x-lunicorn/LogSquirl-Logcat/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/64x-lunicorn/LogSquirl-Logcat/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/64x-lunicorn/LogSquirl-Logcat/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/64x-lunicorn/LogSquirl-Logcat/releases/tag/v0.1.0
