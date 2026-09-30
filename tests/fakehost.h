@@ -31,6 +31,8 @@
 
 #include "plugin.h"
 
+#include <catch2/catch.hpp>
+
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QStringList>
@@ -109,3 +111,22 @@ inline bool waitFor( const std::function<bool()>& condition, int timeoutMs = 500
 }
 
 } // namespace logcat_test
+
+// Let Catch print Qt strings in failure messages.
+namespace Catch {
+template <>
+struct StringMaker<QString> {
+    static std::string convert( const QString& value )
+    {
+        return '"' + value.toStdString() + '"';
+    }
+};
+
+template <>
+struct StringMaker<QByteArray> {
+    static std::string convert( const QByteArray& value )
+    {
+        return '"' + value.toStdString() + '"';
+    }
+};
+} // namespace Catch

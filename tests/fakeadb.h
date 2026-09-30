@@ -84,6 +84,21 @@ inline QString installFakeAdb( const FakeHost& host,
     useAdb( host, path );
     return path;
 }
+
+/**
+ * A logcat script that prints "first", waits until the file @p trigger
+ * exists, prints "after", then waits to be stopped.  Lets a test change
+ * something between two lines of output.
+ */
+inline QByteArray scriptWaitingFor( const QString& trigger )
+{
+    return "printf 'first\\n'\n"
+           "while [ ! -e '"
+           + trigger.toUtf8()
+           + "' ]; do sleep 0.02; done\n"
+             "printf 'after\\n'\n"
+             "exec sleep 30\n";
+}
 #endif
 
 } // namespace logcat_test

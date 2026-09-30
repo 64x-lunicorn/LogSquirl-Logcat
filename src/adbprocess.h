@@ -184,6 +184,10 @@ public:
      * existing LogSquirl tab keeps its content.  New logcat output is
      * redirected to the new file.
      *
+     * If the new file cannot be created, errorOccurred() is emitted and
+     * the capture continues in the old file; if that cannot be reopened
+     * either, the session is stopped (finished() is emitted).
+     *
      * @return Absolute path to the new temp file, or empty on failure.
      */
     QString rotateLog();

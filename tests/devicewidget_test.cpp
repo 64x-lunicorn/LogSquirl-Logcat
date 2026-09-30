@@ -32,6 +32,7 @@
 #include "fakeadb.h"
 
 #include <QDir>
+#include <QFile>
 #include <QTemporaryDir>
 
 using logcat::DeviceWidget;
@@ -147,6 +148,39 @@ SCENARIO( "stopping a session is not reported as an error", "[devicewidget]" )
                 REQUIRE( host.notifications.first().startsWith( "Logcat stopped" ) );
             }
         }
+    }
+}
+#endif
+
+#ifdef Q_OS_UNIX
+SCENARIO( "a failed rotation is reported once", "[devicewidget]" )
+{
+    GIVEN( "a session whose log directory no longer accepts new files" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        DeviceWidget widget;
+        QTemporaryDir logDir;
+        REQUIRE( widget.startSession( "emulator-5554", logDir.filePath( "capture.log" ) ) );
+        host.notifications.clear();
+        host.openedFiles.clear();
+
+        WHEN( "rotating the session" )
+        {
+            const auto permissions = QFile::permissions( logDir.path() );
+            QFile::setPermissions( logDir.path(), QFileDevice::ReadOwner | QFileDevice::ExeOwner );
+            widget.rotateSession( "emulator-5554" );
+            QFile::setPermissions( logDir.path(), permissions );
+
+            THEN( "the user is told once, no tab is opened, and the session goes on" )
+            {
+                REQUIRE( host.notifications.size() == 1 );
+                REQUIRE( host.openedFiles.isEmpty() );
+                REQUIRE( widget.isSessionActive( "emulator-5554" ) );
+            }
+        }
+
+        widget.stopAll();
     }
 }
 #endif

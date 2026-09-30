@@ -196,7 +196,7 @@ void DeviceWidget::rotateSession( const QString& serial )
 
     const auto newPath = proc->rotateLog();
     if ( newPath.isEmpty() ) {
-        hostNotify( "Failed to rotate log for " + serial );
+        // rotateLog() has reported why through errorOccurred()
         return;
     }
 

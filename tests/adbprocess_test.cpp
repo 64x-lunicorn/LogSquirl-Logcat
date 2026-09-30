@@ -48,6 +48,32 @@ QByteArray readFile( const QString& path )
     return file.open( QIODevice::ReadOnly ) ? file.readAll() : QByteArray();
 }
 
+void touch( const QString& path )
+{
+    QFile file( path );
+    REQUIRE( file.open( QIODevice::WriteOnly ) );
+}
+
+/// Makes a directory read-only for its lifetime, so no file can be created in it.
+class ReadOnlyDir {
+public:
+    explicit ReadOnlyDir( const QString& path )
+        : path_( path )
+        , permissions_( QFile::permissions( path ) )
+    {
+        QFile::setPermissions( path_, QFileDevice::ReadOwner | QFileDevice::ExeOwner );
+    }
+
+    ~ReadOnlyDir()
+    {
+        QFile::setPermissions( path_, permissions_ );
+    }
+
+private:
+    QString path_;
+    QFileDevice::Permissions permissions_;
+};
+
 } // namespace
 
 SCENARIO( "AdbProcess construction and properties", "[adbprocess]" )
@@ -160,8 +186,8 @@ SCENARIO( "start reports whether adb could be launched", "[adbprocess]" )
         QTemporaryDir logDir;
         const auto savePath = logDir.filePath( "capture.log" );
 
-        AdbProcess proc( "emulator-5554", savePath );
         QStringList errors;
+        AdbProcess proc( "emulator-5554", savePath );
         QObject::connect( &proc, &AdbProcess::errorOccurred,
                           [ &errors ]( const QString& message ) { errors << message; } );
 
@@ -320,6 +346,67 @@ SCENARIO( "rotateLog moves the capture to a new file", "[adbprocess]" )
             THEN( "the old file keeps its content" )
             {
                 REQUIRE( readFile( oldPath ) == "first\nsecond\n" );
+            }
+        }
+    }
+
+    GIVEN( "a running session whose log directory no longer accepts new files" )
+    {
+        FakeHost host;
+        const auto trigger = host.configDir() + "/go";
+        logcat_test::installFakeAdb( host, logcat_test::scriptWaitingFor( trigger ) );
+        QTemporaryDir logDir;
+        const auto savePath = logDir.filePath( "capture.log" );
+
+        QStringList errors;
+        AdbProcess proc( "emulator-5554", savePath );
+        QObject::connect( &proc, &AdbProcess::errorOccurred,
+                          [ &errors ]( const QString& message ) { errors << message; } );
+        REQUIRE( proc.start() );
+        REQUIRE( waitFor( [ &proc ]() { return proc.lineCount() == 1; } ) );
+
+        WHEN( "rotating fails" )
+        {
+            QString newPath;
+            {
+                ReadOnlyDir readOnly( logDir.path() );
+                newPath = proc.rotateLog();
+            }
+            touch( trigger );
+
+            THEN( "the failure is reported once and the session keeps running" )
+            {
+                REQUIRE( newPath.isEmpty() );
+                REQUIRE( errors.size() == 1 );
+                REQUIRE( proc.isRunning() );
+            }
+
+            THEN( "later output still reaches the old file" )
+            {
+                REQUIRE( proc.tempFilePath() == savePath );
+                REQUIRE( waitFor( [ &proc ]() { return proc.lineCount() == 2; } ) );
+                REQUIRE( readFile( savePath ) == "first\nafter\n" );
+            }
+        }
+
+        AND_WHEN( "rotating fails and the old file cannot be reopened either" )
+        {
+            int finishedCount = 0;
+            QObject::connect( &proc, &AdbProcess::finished,
+                              [ &finishedCount ]( int ) { ++finishedCount; } );
+            QString newPath;
+            {
+                QFile::setPermissions( savePath, QFileDevice::ReadOwner );
+                ReadOnlyDir readOnly( logDir.path() );
+                newPath = proc.rotateLog();
+            }
+
+            THEN( "the session stops instead of running without a file" )
+            {
+                REQUIRE( newPath.isEmpty() );
+                REQUIRE( errors.size() == 1 );
+                REQUIRE_FALSE( proc.isRunning() );
+                REQUIRE( finishedCount == 1 );
             }
         }
     }

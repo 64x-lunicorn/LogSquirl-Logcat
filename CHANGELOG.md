@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generated file names get a `_2`, `_3`, … suffix when a file of that
   name exists, so a rotation within the same second as the start no
   longer wipes the capture it rotates away from.
+- A rotation that cannot create its new file no longer leaves the session
+  running with its log file closed, which silently dropped all further
+  output: the capture continues in the old file and the error is shown.
 - A second session is refused instead of writing into the save path of
   one that is still running.
 - Wireless devices (`192.168.1.5:5555`) get a valid temporary file name
