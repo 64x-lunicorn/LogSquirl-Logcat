@@ -23,8 +23,8 @@
  *
  * A FakeHost installs itself into g_state for its lifetime: the plugin
  * gets a private, empty config directory (so tests never read or write
- * a real logcat.ini), and every log message, notification and
- * open_file() request is recorded for the test to inspect.
+ * a real logcat.ini), and every log message, notification, open_file()
+ * request and menu entry is recorded for the test to inspect.
  */
 
 #pragma once
@@ -35,6 +35,7 @@
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QList>
 #include <QStringList>
 #include <QTemporaryDir>
 #include <QThread>
@@ -45,6 +46,19 @@ namespace logcat_test {
 
 class FakeHost {
 public:
+    /** A menu entry the plugin registered. */
+    struct MenuAction {
+        QString label;
+        void ( *callback )( void* userData );
+        void* userData;
+
+        /** Click the entry. */
+        void trigger() const
+        {
+            callback( userData );
+        }
+    };
+
     FakeHost()
         : configDirUtf8_( configDir_.path().toUtf8() )
     {
@@ -60,6 +74,13 @@ public:
         api_.open_file = []( void* handle, const char* filePath, int ) {
             self( handle )->openedFiles << QString::fromUtf8( filePath );
         };
+        api_.register_menu_action = []( void* handle, const char*, const char* label,
+                                        void ( *callback )( void* ), void* userData ) {
+            self( handle )->menuActions.append(
+                { QString::fromUtf8( label ), callback, userData } );
+        };
+        api_.register_sidebar_tab = []( void*, const char*, void* ) {};
+        api_.unregister_sidebar_tab = []( void*, void* ) {};
 
         logcat::g_state.api = &api_;
         logcat::g_state.handle = this;
@@ -83,6 +104,7 @@ public:
     QStringList logs;
     QStringList notifications;
     QStringList openedFiles;
+    QList<MenuAction> menuActions;
 
 private:
     static FakeHost* self( void* handle )

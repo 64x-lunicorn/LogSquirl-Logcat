@@ -23,6 +23,7 @@ add_executable(logsquirl_logcat_tests
     takelines_test.cpp
     devicewidget_test.cpp
     generatelogpath_test.cpp
+    plugin_test.cpp
 )
 
 set_target_properties(logsquirl_logcat_tests PROPERTIES

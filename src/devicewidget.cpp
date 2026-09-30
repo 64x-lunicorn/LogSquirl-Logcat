@@ -63,6 +63,10 @@ DeviceWidget::DeviceWidget( QWidget* parent )
     setWindowTitle( "Android Logcat" );
     setMinimumWidth( 420 );
 
+    // A top-level window of the plugin's own: when it is open while the
+    // user closes LogSquirl's main window, LogSquirl must still quit.
+    setAttribute( Qt::WA_QuitOnClose, false );
+
     auto* mainLayout = new QVBoxLayout( this );
 
     // ── Device group ─────────────────────────────────────────────────

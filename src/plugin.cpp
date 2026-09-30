@@ -47,9 +47,11 @@
 #include "devicewidget.h"
 #include "sidebarwidget.h"
 
+#include <QApplication>
 #include <QFileDialog>
 #include <QInputDialog>
 #include <QSettings>
+#include <QWindow>
 
 // ── Global state ─────────────────────────────────────────────────────────
 
@@ -96,9 +98,21 @@ static void showLogcatDialog( void* /* userData */ )
     if ( !logcat::g_state.dialog ) {
         logcat::g_state.dialog = new logcat::DeviceWidget();
     }
-    logcat::g_state.dialog->show();
-    logcat::g_state.dialog->raise();
-    logcat::g_state.dialog->activateWindow();
+    auto* dialog = logcat::g_state.dialog;
+
+    // The dialog is created parentless in init() and deleted in shutdown(),
+    // so it must not become a child of a main window that may be destroyed
+    // first.  A transient parent keeps it on top of the window whose menu
+    // opened it, without handing over ownership.
+    auto* window = QApplication::activeWindow();
+    if ( window && window != dialog ) {
+        dialog->winId(); // creates the native window, and so windowHandle()
+        dialog->windowHandle()->setTransientParent( window->windowHandle() );
+    }
+
+    dialog->show();
+    dialog->raise();
+    dialog->activateWindow();
 }
 
 // ── Exported C entry points ──────────────────────────────────────────────

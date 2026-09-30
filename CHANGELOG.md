@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stopping a session on Windows no longer freezes LogSquirl for three
   seconds: adb is killed right away, since as a console program it ignores
   the polite request to close.
+- The Android Logcat dialog (Plugins menu) stays on top of LogSquirl's
+  window, and no longer keeps LogSquirl running when it is open while the
+  main window is closed.
 - adb's stderr is no longer discarded: its warnings go to the LogSquirl
   log, and when adb exits with an error (device offline, not found,
   unauthorised) the notification says what adb reported.
