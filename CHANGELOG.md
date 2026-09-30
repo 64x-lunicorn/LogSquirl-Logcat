@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file cleanup never took effect): each stopped session reported back that
   it had ended, and handling that preserved its file. It also rescanned
   the devices once per session, blocking the shutdown.
+- Deleting the dialog with sessions still running no longer calls back
+  into the half-destroyed dialog.
 - Stopping a session no longer shows an "ADB process crashed" error on
   macOS and Linux, where adb ends from the stop signal.
 - Starting, stopping and rotating never truncate an existing log file.

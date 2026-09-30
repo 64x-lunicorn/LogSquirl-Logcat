@@ -83,6 +83,10 @@ AdbProcess::AdbProcess( const QString& serial, const QString& savePath, QObject*
 
 AdbProcess::~AdbProcess()
 {
+    // The owner may be half-destroyed already (QObject deletes its children
+    // after the owner's own destructor has run), so stopping must not emit
+    // finished() into it.
+    blockSignals( true );
     stop();
 }
 

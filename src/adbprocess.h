@@ -78,6 +78,8 @@ public:
      */
     explicit AdbProcess( const QString& serial, const QString& savePath = {},
                          QObject* parent = nullptr );
+
+    /** Stops the process without emitting any signal. */
     ~AdbProcess() override;
 
     // ── Static helpers ───────────────────────────────────────────────
