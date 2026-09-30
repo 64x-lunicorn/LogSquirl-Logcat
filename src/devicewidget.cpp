@@ -162,15 +162,13 @@ void DeviceWidget::stopAll( bool cleanupTempFiles )
 {
     const auto serials = sessions_.keys();
     for ( const auto& serial : serials ) {
-        if ( auto* proc = sessions_.value( serial ) ) {
-            proc->stop();
-            if ( !cleanupTempFiles ) {
-                proc->preserveTempFile();
-            }
-            proc->deleteLater();
+        auto* proc = takeSession( serial );
+        proc->stop();
+        if ( !cleanupTempFiles ) {
+            proc->preserveTempFile();
         }
+        proc->deleteLater();
     }
-    sessions_.clear();
     updateUiState();
 }
 
@@ -252,11 +250,11 @@ bool DeviceWidget::startSession( const QString& serial, const QString& savePath 
 
 void DeviceWidget::stopSession( const QString& serial )
 {
-    if ( !sessions_.contains( serial ) ) {
+    auto* proc = takeSession( serial );
+    if ( !proc ) {
         return;
     }
 
-    auto* proc = sessions_.take( serial );
     proc->stop();
     proc->preserveTempFile();
 
@@ -335,20 +333,7 @@ void DeviceWidget::startCapture()
 
 void DeviceWidget::stopCapture()
 {
-    const auto serial = currentSerial();
-    if ( serial.isEmpty() || !sessions_.contains( serial ) ) {
-        return;
-    }
-
-    auto* proc = sessions_.take( serial );
-    proc->stop();
-    proc->preserveTempFile();
-    proc->deleteLater();
-
-    hostNotify(
-        QString( "Logcat stopped for %1 (%2 lines)" ).arg( serial ).arg( proc->lineCount() ) );
-
-    refreshDevices();
+    stopSession( currentSerial() );
 }
 
 void DeviceWidget::stopAllCaptures()
@@ -374,16 +359,17 @@ void DeviceWidget::browseSavePath()
 
 void DeviceWidget::onSessionFinished( const QString& serial )
 {
-    if ( sessions_.contains( serial ) ) {
-        auto* proc = sessions_.take( serial );
-
-        // Preserve the temp file so the LogSquirl tab keeps its content.
-        // When using a save path the file is already persistent.
-        proc->preserveTempFile();
-        proc->deleteLater();
-
-        hostLog( LOGSQUIRL_LOG_INFO, QString( "Logcat session for %1 ended." ).arg( serial ) );
+    auto* proc = takeSession( serial );
+    if ( !proc ) {
+        return;
     }
+
+    // Preserve the temp file so the LogSquirl tab keeps its content.
+    // When using a save path the file is already persistent.
+    proc->preserveTempFile();
+    proc->deleteLater();
+
+    hostLog( LOGSQUIRL_LOG_INFO, QString( "Logcat session for %1 ended." ).arg( serial ) );
 
     refreshDevices();
 }
@@ -445,6 +431,19 @@ void DeviceWidget::configureAdbPath()
                                          : "ADB path set to: " + newPath );
         refreshDevices();
     }
+}
+
+AdbProcess* DeviceWidget::takeSession( const QString& serial )
+{
+    auto* proc = sessions_.take( serial );
+    if ( proc ) {
+        // The session is over as far as this widget is concerned.  Stopping
+        // it emits finished(), and onSessionFinished() must not act on that:
+        // it would preserve a temp file that stopAll( true ) is cleaning up,
+        // and rescan the devices once per session.
+        proc->disconnect( this );
+    }
+    return proc;
 }
 
 bool DeviceWidget::isFileInUse( const QString& path ) const
