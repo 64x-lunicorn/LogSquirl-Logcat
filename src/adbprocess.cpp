@@ -274,9 +274,6 @@ void AdbProcess::stop()
     }
 
     tempFile_.close();
-    if ( saveFile_.isOpen() ) {
-        saveFile_.close();
-    }
 
     hostLog( LOGSQUIRL_LOG_INFO,
              qPrintable( QString( "Stopped logcat for device %1 (%2 lines captured)" )
@@ -371,13 +368,6 @@ void AdbProcess::onReadyRead()
             tempFile_.write( "\n", 1 );
             tempFile_.flush();
 
-            // Write to save file if open
-            if ( saveFile_.isOpen() ) {
-                saveFile_.write( lineData );
-                saveFile_.write( "\n", 1 );
-                saveFile_.flush();
-            }
-
             ++lineCount_;
         }
     }
@@ -396,20 +386,11 @@ void AdbProcess::onFinished( int exitCode, QProcess::ExitStatus exitStatus )
         tempFile_.write( "\n", 1 );
         tempFile_.flush();
 
-        if ( saveFile_.isOpen() ) {
-            saveFile_.write( readBuffer_ );
-            saveFile_.write( "\n", 1 );
-            saveFile_.flush();
-        }
-
         ++lineCount_;
         readBuffer_.clear();
     }
 
     tempFile_.close();
-    if ( saveFile_.isOpen() ) {
-        saveFile_.close();
-    }
 
     if ( exitStatus == QProcess::CrashExit ) {
         hostLog( LOGSQUIRL_LOG_WARNING,

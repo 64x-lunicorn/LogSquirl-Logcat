@@ -205,7 +205,6 @@ private:
     QProcess process_;
     QTemporaryDir tempDir_;
     QFile tempFile_;
-    QFile saveFile_;
     QByteArray readBuffer_; ///< Accumulates partial lines from stdout.
     qint64 lineCount_ = 0;
     int rotationCount_ = 0;      ///< Incremented on each rotateLog() call.
