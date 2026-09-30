@@ -214,33 +214,29 @@ bool DeviceWidget::startSession( const QString& serial, const QString& savePath 
 
     auto* proc = new AdbProcess( serial, savePath, this );
 
-    connect( proc, &AdbProcess::started, this, [ this, serial ]() {
-        hostLog( LOGSQUIRL_LOG_INFO, "Logcat session started for " + serial );
-    } );
-
     connect( proc, &AdbProcess::finished, this,
              [ this, serial ]( int ) { onSessionFinished( serial ); } );
 
     connect( proc, &AdbProcess::errorOccurred, this,
              [ this, serial ]( const QString& msg ) { onSessionError( serial, msg ); } );
 
-    proc->start();
-
-    if ( proc->isRunning() || !proc->tempFilePath().isEmpty() ) {
-        sessions_.insert( serial, proc );
-
-        if ( g_state.api && g_state.handle ) {
-            const auto path = proc->tempFilePath().toUtf8();
-            g_state.api->open_file( g_state.handle, path.constData(), 1 );
-            hostNotify( QString( "Logcat started for %1" ).arg( serial ) );
-        }
-
-        refreshDevices();
-        return true;
+    if ( !proc->start() ) {
+        // start() has reported why through errorOccurred()
+        delete proc;
+        return false;
     }
 
-    delete proc;
-    return false;
+    sessions_.insert( serial, proc );
+
+    // Ask the host to open the log file in a follow-mode tab
+    if ( g_state.api && g_state.handle ) {
+        const auto path = proc->tempFilePath().toUtf8();
+        g_state.api->open_file( g_state.handle, path.constData(), 1 );
+    }
+    hostNotify( QString( "Logcat started for %1" ).arg( serial ) );
+
+    refreshDevices(); // Update combo box markers
+    return true;
 }
 
 void DeviceWidget::stopSession( const QString& serial )
@@ -323,39 +319,7 @@ void DeviceWidget::startCapture()
                               ? savePathEdit_->text()
                               : QString();
 
-    // Create and start the ADB process
-    auto* proc = new AdbProcess( serial, savePath, this );
-
-    connect( proc, &AdbProcess::started, this, [ this, serial ]() {
-        hostLog( LOGSQUIRL_LOG_INFO, "Logcat session started for " + serial );
-    } );
-
-    connect( proc, &AdbProcess::finished, this,
-             [ this, serial ]( int ) { onSessionFinished( serial ); } );
-
-    connect( proc, &AdbProcess::errorOccurred, this,
-             [ this, serial ]( const QString& msg ) { onSessionError( serial, msg ); } );
-
-    proc->start();
-
-    if ( proc->isRunning() || !proc->tempFilePath().isEmpty() ) {
-        sessions_.insert( serial, proc );
-
-        // Ask the host to open the temp file in a follow-mode tab
-        if ( g_state.api && g_state.handle ) {
-            const auto path = proc->tempFilePath().toUtf8();
-            g_state.api->open_file( g_state.handle, path.constData(), 1 );
-        }
-
-        // Notify via host notification
-        hostNotify( QString( "Logcat started for %1" ).arg( serial ) );
-    }
-    else {
-        // start() failed synchronously — proc emitted errorOccurred already
-        delete proc;
-    }
-
-    refreshDevices(); // Update combo box markers
+    startSession( serial, savePath );
 }
 
 void DeviceWidget::stopCapture()

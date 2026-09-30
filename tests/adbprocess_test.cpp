@@ -22,18 +22,33 @@
  * @brief BDD tests for AdbProcess instance behaviour.
  *
  * Tests basic construction, property accessors, and configDir fallback
- * without requiring a running ADB daemon.
+ * without requiring a running ADB daemon.  Starting a session runs a
+ * stand-in for adb (see fakeadb.h); the scenarios that need a working
+ * one use a shell script and only run on Unix.
  */
 
 #include <catch2/catch.hpp>
 
 #include "adbprocess.h"
+#include "fakeadb.h"
 #include "plugin.h"
 
 #include <QFile>
 #include <QTemporaryDir>
 
 using logcat::AdbProcess;
+using logcat_test::FakeHost;
+using logcat_test::waitFor;
+
+namespace {
+
+QByteArray readFile( const QString& path )
+{
+    QFile file( path );
+    return file.open( QIODevice::ReadOnly ) ? file.readAll() : QByteArray();
+}
+
+} // namespace
 
 SCENARIO( "AdbProcess construction and properties", "[adbprocess]" )
 {
@@ -134,4 +149,90 @@ SCENARIO( "rotateLog creates a new temp file and preserves the old one", "[adbpr
             REQUIRE( proc.lineCount() == 0 );
         }
     }
+}
+
+SCENARIO( "start reports whether adb could be launched", "[adbprocess]" )
+{
+    GIVEN( "an adb that cannot be executed" )
+    {
+        FakeHost host;
+        logcat_test::installBrokenAdb( host );
+        QTemporaryDir logDir;
+        const auto savePath = logDir.filePath( "capture.log" );
+
+        AdbProcess proc( "emulator-5554", savePath );
+        QStringList errors;
+        QObject::connect( &proc, &AdbProcess::errorOccurred,
+                          [ &errors ]( const QString& message ) { errors << message; } );
+
+        WHEN( "starting the session" )
+        {
+            const auto started = proc.start();
+
+            THEN( "start() fails and the session is not running" )
+            {
+                REQUIRE_FALSE( started );
+                REQUIRE_FALSE( proc.isRunning() );
+            }
+
+            THEN( "the failure is reported exactly once" )
+            {
+                REQUIRE( errors.size() == 1 );
+            }
+
+            THEN( "no empty log file is left behind" )
+            {
+                REQUIRE_FALSE( QFileInfo::exists( savePath ) );
+                REQUIRE( proc.tempFilePath().isEmpty() );
+            }
+        }
+    }
+
+    GIVEN( "an adb that cannot be executed and a save path that already holds a capture" )
+    {
+        FakeHost host;
+        logcat_test::installBrokenAdb( host );
+        QTemporaryDir logDir;
+        const auto savePath = logDir.filePath( "capture.log" );
+        {
+            QFile existing( savePath );
+            REQUIRE( existing.open( QIODevice::WriteOnly ) );
+            existing.write( "earlier capture\n" );
+        }
+
+        AdbProcess proc( "emulator-5554", savePath );
+
+        WHEN( "starting the session fails" )
+        {
+            REQUIRE_FALSE( proc.start() );
+
+            THEN( "the earlier capture is kept" )
+            {
+                REQUIRE( QFileInfo::exists( savePath ) );
+            }
+        }
+    }
+
+#ifdef Q_OS_UNIX
+    GIVEN( "a working adb" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+
+        AdbProcess proc( "emulator-5554" );
+
+        WHEN( "starting the session" )
+        {
+            const auto started = proc.start();
+
+            THEN( "start() succeeds and logcat output reaches the log file" )
+            {
+                REQUIRE( started );
+                REQUIRE( proc.isRunning() );
+                REQUIRE( waitFor( [ &proc ]() { return proc.lineCount() == 2; } ) );
+                REQUIRE( readFile( proc.tempFilePath() ) == "first\nsecond\n" );
+            }
+        }
+    }
+#endif
 }

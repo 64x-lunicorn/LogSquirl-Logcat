@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   8-bit encoding is not UTF-8.
 - Lines that adb terminates with `\r\n` no longer keep a stray carriage
   return in the log file.
+- A session whose adb cannot be launched is no longer listed as active
+  with nothing running: the error is shown once, no tab is opened, and
+  no empty log file is left behind.
 
 ## [0.3.0] — 2026-04-02
 

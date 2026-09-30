@@ -34,8 +34,8 @@
  * USAGE
  * ─────
  *   auto* proc = new AdbProcess( "SERIAL123", "/optional/save.log", parent );
- *   proc->start();                    // launches `adb -s SERIAL123 logcat`
- *   qDebug() << proc->tempFilePath(); // LogSquirl opens this file
+ *   if ( proc->start() )              // launches `adb -s SERIAL123 logcat`
+ *       qDebug() << proc->tempFilePath(); // LogSquirl opens this file
  *   proc->stop();                     // sends SIGTERM, waits for exit
  */
 
@@ -137,8 +137,16 @@ public:
 
     // ── Instance methods ─────────────────────────────────────────────
 
-    /** Start the logcat process.  No-op if already running. */
-    void start();
+    /**
+     * Open the log file and launch the logcat process.  No-op if already
+     * running.
+     *
+     * On failure the reason has been emitted through errorOccurred(), and
+     * a log file that start() created is removed again.
+     *
+     * @return true if adb is running, false if the session did not start.
+     */
+    bool start();
 
     /** Stop the logcat process (SIGTERM).  No-op if not running. */
     void stop();
@@ -218,6 +226,9 @@ private:
     /** Write out a buffered partial line, e.g. before the file is closed. */
     void flushPartialLine();
 
+    /** Close the log file after a failed start; remove it if start() created it. */
+    void discardLogFile();
+
     QString serial_;
     QString savePath_;
 
@@ -226,8 +237,9 @@ private:
     QFile tempFile_;
     QByteArray readBuffer_; ///< Accumulates partial lines from stdout.
     qint64 lineCount_ = 0;
-    int rotationCount_ = 0;      ///< Incremented on each rotateLog() call.
-    bool usingSavePath_ = false; ///< True when writing directly to the log directory.
+    int rotationCount_ = 0;       ///< Incremented on each rotateLog() call.
+    bool usingSavePath_ = false;  ///< True when writing directly to the log directory.
+    bool createdLogFile_ = false; ///< True when start() created the log file.
 };
 
 } // namespace logcat

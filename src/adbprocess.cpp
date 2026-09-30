@@ -223,10 +223,10 @@ QList<QByteArray> AdbProcess::takeLines( QByteArray& buffer )
 
 // ── Instance: start / stop ──────────────────────────────────────────────
 
-void AdbProcess::start()
+bool AdbProcess::start()
 {
     if ( isRunning() ) {
-        return;
+        return true;
     }
 
     const auto adb = findAdb();
@@ -234,36 +234,33 @@ void AdbProcess::start()
         Q_EMIT errorOccurred( "ADB executable not found.\n\n"
                               "Set the path via Plugins → Configure, or ensure "
                               "ANDROID_HOME is set." );
-        return;
+        return false;
     }
 
     // When a save path is configured, write directly to the log directory
     // instead of creating a temporary file.  This avoids accumulating
     // orphaned temp files and ensures the user's log directory is used.
+    QString path;
     if ( !savePath_.isEmpty() ) {
         QDir().mkpath( QFileInfo( savePath_ ).absolutePath() );
-        tempFile_.setFileName( savePath_ );
-        if ( !tempFile_.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
-            Q_EMIT errorOccurred( "Failed to open log file: " + tempFile_.errorString() );
-            return;
-        }
-        usingSavePath_ = true;
+        path = savePath_;
     }
     else {
         if ( !tempDir_.isValid() ) {
             Q_EMIT errorOccurred( "Failed to create temporary directory." );
-            return;
+            return false;
         }
-
-        // Open the temporary file for writing
-        const auto tempPath = tempDir_.path() + "/logcat_" + serial_ + ".log";
-        tempFile_.setFileName( tempPath );
-        if ( !tempFile_.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
-            Q_EMIT errorOccurred( "Failed to open temp file: " + tempFile_.errorString() );
-            return;
-        }
-        usingSavePath_ = false;
+        path = tempDir_.path() + "/logcat_" + serial_ + ".log";
     }
+
+    createdLogFile_ = !QFileInfo::exists( path );
+    tempFile_.setFileName( path );
+    if ( !tempFile_.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
+        Q_EMIT errorOccurred( "Failed to open log file: " + tempFile_.errorString() );
+        tempFile_.setFileName( {} );
+        return false;
+    }
+    usingSavePath_ = !savePath_.isEmpty();
 
     lineCount_ = 0;
     readBuffer_.clear();
@@ -272,7 +269,19 @@ void AdbProcess::start()
     process_.setArguments( { "-s", serial_, "logcat" } );
     process_.start();
 
+    // Wait for the launch itself (not for any output) so that a failure is
+    // reported to the caller here.  Otherwise QProcess reports it later,
+    // as an error without a finished() signal, and the session would stay
+    // registered with nothing running.  onErrorOccurred() has already
+    // emitted the reason.
+    if ( !process_.waitForStarted() ) {
+        discardLogFile();
+        return false;
+    }
+
     hostLog( LOGSQUIRL_LOG_INFO, QString( "Started logcat for device %1" ).arg( serial_ ) );
+    Q_EMIT started();
+    return true;
 }
 
 void AdbProcess::stop()
@@ -365,6 +374,15 @@ void AdbProcess::writeLine( const QByteArray& line )
     ++lineCount_;
 }
 
+void AdbProcess::discardLogFile()
+{
+    tempFile_.close();
+    if ( createdLogFile_ ) {
+        tempFile_.remove();
+    }
+    tempFile_.setFileName( {} );
+}
+
 void AdbProcess::flushPartialLine()
 {
     if ( readBuffer_.isEmpty() ) {
@@ -425,7 +443,8 @@ void AdbProcess::onErrorOccurred( QProcess::ProcessError error )
         break;
     }
 
-    hostLog( LOGSQUIRL_LOG_ERROR, message );
+    // The receiver logs and shows the message; logging it here as well
+    // would report every error twice.
     Q_EMIT errorOccurred( message );
 }
 
