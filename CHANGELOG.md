@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   startup and two or three times per Start or Stop. Starting and stopping
   a session no longer rescan at all, and refreshes requested while a scan
   is running share its result.
+- On Windows, an adb that cannot be started no longer logs a false "adb
+  devices timed out" 10 seconds later, and closing the dialog while a
+  device scan runs kills the scan instead of leaving it to Qt.
 - Stopping a session on Windows no longer freezes LogSquirl for three
   seconds: adb is killed right away, since as a console program it ignores
   the polite request to close.

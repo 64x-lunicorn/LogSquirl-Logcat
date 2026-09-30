@@ -186,9 +186,14 @@ DeviceWidget::DeviceWidget( QWidget* parent )
 
 DeviceWidget::~DeviceWidget()
 {
-    // ~QProcess waits for a running scan and emits finished() - by then
-    // this widget is half-destroyed.
+    // The scan must not report into a half-destroyed widget, and a scan
+    // that is still running is killed and reaped here rather than left
+    // to ~QProcess, which only warns and waits for it.
     scanProcess_->disconnect( this );
+    if ( scanProcess_->state() != QProcess::NotRunning ) {
+        scanProcess_->kill();
+        scanProcess_->waitForFinished( 1000 );
+    }
 }
 
 // ── Public methods ──────────────────────────────────────────────────────
@@ -328,8 +333,10 @@ void DeviceWidget::refreshDevices()
 
     scanProcess_->setProgram( adb );
     scanProcess_->setArguments( { "devices" } );
-    scanProcess_->start();
+    // Arm the timeout first: on Windows a failed start is reported from
+    // inside start(), and that handler stops the timeout.
     scanTimeout_->start();
+    scanProcess_->start();
 }
 
 void DeviceWidget::onScanFinished( int exitCode, QProcess::ExitStatus exitStatus )

@@ -36,11 +36,140 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QProcess>
 #include <QTemporaryDir>
+#include <QTimer>
 
 using logcat::DeviceWidget;
 using logcat_test::FakeHost;
 using logcat_test::waitFor;
+
+namespace {
+
+/** Collects the Qt messages printed during its lifetime. */
+class MessageCapture {
+public:
+    MessageCapture()
+    {
+        messages().clear();
+        previous_ = qInstallMessageHandler(
+            []( QtMsgType, const QMessageLogContext&, const QString& message ) {
+                messages().append( message );
+            } );
+    }
+
+    ~MessageCapture()
+    {
+        qInstallMessageHandler( previous_ );
+    }
+
+    MessageCapture( const MessageCapture& ) = delete;
+    MessageCapture& operator=( const MessageCapture& ) = delete;
+
+    static QStringList& messages()
+    {
+        static QStringList list;
+        return list;
+    }
+
+private:
+    QtMessageHandler previous_ = nullptr;
+};
+
+/** The timer that gives up on a hanging `adb devices`. */
+QTimer* scanTimeoutOf( const DeviceWidget& widget )
+{
+    const auto timers = widget.findChildren<QTimer*>( QString(), Qt::FindDirectChildrenOnly );
+    for ( auto* timer : timers ) {
+        if ( timer->isSingleShot() && timer->interval() == 10000 ) {
+            return timer;
+        }
+    }
+    return nullptr;
+}
+
+} // namespace
+
+SCENARIO( "a device scan that cannot start does not time out later", "[devicewidget]" )
+{
+    GIVEN( "a widget whose first scan has failed" )
+    {
+        FakeHost host;
+        logcat_test::installBrokenAdb( host );
+        DeviceWidget widget;
+        auto* scanTimeout = scanTimeoutOf( widget );
+        REQUIRE( scanTimeout != nullptr );
+        REQUIRE( waitFor( [ scanTimeout ]() { return !scanTimeout->isActive(); } ) );
+
+        WHEN( "the next scan fails inside QProcess::start(), as it does on Windows" )
+        {
+            auto* scan = widget.findChild<QProcess*>( QString(), Qt::FindDirectChildrenOnly );
+            REQUIRE( scan != nullptr );
+            QObject::connect( scan, &QProcess::stateChanged,
+                              [ scan ]( QProcess::ProcessState state ) {
+                                  if ( state == QProcess::Starting ) {
+                                      Q_EMIT scan->errorOccurred( QProcess::FailedToStart );
+                                  }
+                              } );
+            widget.refreshDevices();
+
+            THEN( "no timeout is pending for it" )
+            {
+                REQUIRE_FALSE( scanTimeout->isActive() );
+            }
+
+            waitFor( [ scan ]() { return scan->state() == QProcess::NotRunning; } );
+        }
+    }
+}
+
+SCENARIO( "destroying the widget during a device scan ends the scan", "[devicewidget]" )
+{
+    GIVEN( "an adb that cannot be executed" )
+    {
+        FakeHost host;
+        logcat_test::installBrokenAdb( host );
+
+        WHEN( "the widget is destroyed right after it started scanning" )
+        {
+            const MessageCapture capture;
+            {
+                DeviceWidget widget;
+            }
+
+            THEN( "no running process is left to Qt to destroy" )
+            {
+                REQUIRE( MessageCapture::messages().filter( "Destroyed while process" ).isEmpty() );
+            }
+        }
+    }
+
+#ifdef Q_OS_UNIX
+    GIVEN( "an adb whose device scan hangs" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host, "exec sleep 30\n", "exec sleep 30\n" );
+
+        WHEN( "the widget is destroyed while the scan runs" )
+        {
+            const MessageCapture capture;
+            QElapsedTimer timer;
+            timer.start();
+            {
+                DeviceWidget widget;
+                logcat_test::processEventsFor( 200 );
+            }
+            const auto elapsedMs = timer.elapsed();
+
+            THEN( "the scan is killed, not waited for, and not left running" )
+            {
+                REQUIRE( elapsedMs < 3000 );
+                REQUIRE( MessageCapture::messages().filter( "Destroyed while process" ).isEmpty() );
+            }
+        }
+    }
+#endif
+}
 
 SCENARIO( "a session is only accepted when adb starts", "[devicewidget]" )
 {
