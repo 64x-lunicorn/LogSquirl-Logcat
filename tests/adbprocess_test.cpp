@@ -32,16 +32,19 @@
 #include "adbprocess.h"
 #include "fakeadb.h"
 #include "plugin.h"
+#include "readonlydir.h"
 
 #include <QFile>
 #include <QTemporaryDir>
 
 using logcat::AdbProcess;
 using logcat_test::FakeHost;
+using logcat_test::ReadOnlyDir;
 using logcat_test::waitFor;
 
 namespace {
 
+#ifdef Q_OS_UNIX
 QByteArray readFile( const QString& path )
 {
     QFile file( path );
@@ -53,27 +56,7 @@ void touch( const QString& path )
     QFile file( path );
     REQUIRE( file.open( QIODevice::WriteOnly ) );
 }
-
-/// Makes a directory read-only for its lifetime, so no file can be created in it.
-class ReadOnlyDir {
-public:
-    explicit ReadOnlyDir( const QString& path )
-        : path_( path )
-        , permissions_( QFile::permissions( path ) )
-    {
-        QFile::setPermissions( path_, QFileDevice::ReadOwner | QFileDevice::ExeOwner );
-    }
-
-    ~ReadOnlyDir()
-    {
-        QFile::setPermissions( path_, permissions_ );
-    }
-
-private:
-    QString path_;
-    QFileDevice::Permissions permissions_;
-};
-
+#endif
 } // namespace
 
 SCENARIO( "AdbProcess construction and properties", "[adbprocess]" )
@@ -140,39 +123,21 @@ SCENARIO( "findAdb returns a path or empty string", "[adbprocess]" )
     }
 }
 
-SCENARIO( "rotateLog creates a new temp file and preserves the old one", "[adbprocess]" )
+SCENARIO( "rotateLog does nothing while no session runs", "[adbprocess]" )
 {
-    GIVEN( "an AdbProcess that is not running" )
+    GIVEN( "an AdbProcess that has not been started" )
     {
         AdbProcess proc( "test-device" );
 
-        WHEN( "rotateLog is called without starting the process" )
+        WHEN( "rotateLog is called" )
         {
             const auto result = proc.rotateLog();
 
-            THEN( "it returns an empty string because the process is not running" )
+            THEN( "it returns an empty path and the line count stays at 0" )
             {
                 REQUIRE( result.isEmpty() );
+                REQUIRE( proc.lineCount() == 0 );
             }
-        }
-    }
-
-    GIVEN( "an AdbProcess whose temp file has been manually set up for testing" )
-    {
-        // We cannot call start() without a real ADB, but we can verify that
-        // rotateLog returns empty when not running (no process = no rotation).
-        AdbProcess proc( "rotate-test-device" );
-
-        THEN( "rotateLog returns empty because no process is running" )
-        {
-            REQUIRE( proc.rotateLog().isEmpty() );
-        }
-
-        THEN( "the rotation count stays at 0 after a failed rotation" )
-        {
-            proc.rotateLog();
-            // lineCount stays at 0 since nothing was rotated
-            REQUIRE( proc.lineCount() == 0 );
         }
     }
 }
@@ -352,6 +317,11 @@ SCENARIO( "rotateLog moves the capture to a new file", "[adbprocess]" )
 
     GIVEN( "a running session whose log directory no longer accepts new files" )
     {
+        if ( !ReadOnlyDir::isEnforced() ) {
+            WARN( "File permissions are not enforced (running as root?); skipped." );
+            return;
+        }
+
         FakeHost host;
         const auto trigger = host.configDir() + "/go";
         logcat_test::installFakeAdb( host, logcat_test::scriptWaitingFor( trigger ) );

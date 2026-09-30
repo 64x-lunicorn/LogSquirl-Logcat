@@ -30,6 +30,7 @@
 
 #include "devicewidget.h"
 #include "fakeadb.h"
+#include "readonlydir.h"
 
 #include <QDir>
 #include <QElapsedTimer>
@@ -159,6 +160,11 @@ SCENARIO( "a failed rotation is reported once", "[devicewidget]" )
 {
     GIVEN( "a session whose log directory no longer accepts new files" )
     {
+        if ( !logcat_test::ReadOnlyDir::isEnforced() ) {
+            WARN( "File permissions are not enforced (running as root?); skipped." );
+            return;
+        }
+
         FakeHost host;
         logcat_test::installFakeAdb( host );
         DeviceWidget widget;
@@ -169,10 +175,10 @@ SCENARIO( "a failed rotation is reported once", "[devicewidget]" )
 
         WHEN( "rotating the session" )
         {
-            const auto permissions = QFile::permissions( logDir.path() );
-            QFile::setPermissions( logDir.path(), QFileDevice::ReadOwner | QFileDevice::ExeOwner );
-            widget.rotateSession( "emulator-5554" );
-            QFile::setPermissions( logDir.path(), permissions );
+            {
+                const logcat_test::ReadOnlyDir readOnly( logDir.path() );
+                widget.rotateSession( "emulator-5554" );
+            }
 
             THEN( "the user is told once, no tab is opened, and the session goes on" )
             {
