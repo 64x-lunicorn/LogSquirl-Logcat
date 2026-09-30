@@ -342,13 +342,15 @@ void AdbProcess::endProcess()
     // set, so that the exit, when it comes, is not reported as a crash.
 }
 
-void AdbProcess::preserveTempFile()
+QString AdbProcess::preserveTempFile()
 {
     // When writing directly to the log directory, the temp dir is unused
     // and can be auto-removed safely.
-    if ( !usingSavePath_ ) {
-        tempDir_.setAutoRemove( false );
+    if ( usingSavePath_ ) {
+        return {};
     }
+    tempDir_.setAutoRemove( false );
+    return tempDir_.path();
 }
 
 void AdbProcess::removeTempFiles()

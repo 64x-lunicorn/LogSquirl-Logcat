@@ -403,6 +403,55 @@ SCENARIO( "stopAll decides whether temporary log files survive", "[devicewidget]
         }
     }
 
+    GIVEN( "a temporary-file session that was stopped before another one started" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        auto* widget = new DeviceWidget;
+        REQUIRE( widget->startSession( "emulator-5554" ) );
+        widget->stopSession( "emulator-5554" );
+        REQUIRE( widget->startSession( "emulator-5556" ) );
+        REQUIRE( host.openedFiles.size() == 2 );
+        const auto stoppedDir = QFileInfo( host.openedFiles.first() ).absolutePath();
+        const auto runningDir = QFileInfo( host.openedFiles.last() ).absolutePath();
+        REQUIRE( stoppedDir != runningDir );
+        REQUIRE( QFileInfo::exists( stoppedDir ) );
+
+        WHEN( "the plugin shuts down: stopAll( true ), then the widget is deleted" )
+        {
+            widget->stopAll( true );
+            delete widget;
+
+            THEN( "the temporary directories of both sessions are removed" )
+            {
+                REQUIRE_FALSE( QFileInfo::exists( stoppedDir ) );
+                REQUIRE_FALSE( QFileInfo::exists( runningDir ) );
+            }
+        }
+    }
+
+    GIVEN( "a stopped session that wrote to a save path" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        auto* widget = new DeviceWidget;
+        QTemporaryDir logDir;
+        const auto savePath = logDir.filePath( "capture.log" );
+        REQUIRE( widget->startSession( "emulator-5554", savePath ) );
+        widget->stopSession( "emulator-5554" );
+
+        WHEN( "the plugin shuts down" )
+        {
+            widget->stopAll( true );
+            delete widget;
+
+            THEN( "the save file is kept" )
+            {
+                REQUIRE( QFileInfo::exists( savePath ) );
+            }
+        }
+    }
+
     GIVEN( "a session writing to a temporary file that has been rotated" )
     {
         FakeHost host;

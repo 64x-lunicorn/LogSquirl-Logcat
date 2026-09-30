@@ -177,8 +177,11 @@ public:
      * Prevent the temporary log file from being deleted when this
      * object is destroyed.  Call before deleteLater() so that the
      * LogSquirl tab can keep displaying the captured output.
+     *
+     * @return The temporary directory left on disk, or empty when the
+     *         session writes to a save path (nothing to preserve).
      */
-    void preserveTempFile();
+    QString preserveTempFile();
 
     /**
      * Remove the temporary directory now, with the files of every rotation
