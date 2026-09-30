@@ -52,6 +52,7 @@
 #include <QInputDialog>
 #include <QMessageBox>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QVBoxLayout>
 
 namespace logcat {
@@ -109,6 +110,7 @@ DeviceWidget::DeviceWidget( QWidget* parent )
     deviceRow->addWidget( deviceCombo_ );
 
     refreshButton_ = new QPushButton( "⟳ Refresh", this );
+    refreshButton_->setObjectName( "refresh" );
     refreshButton_->setToolTip( "Refresh device list" );
     deviceRow->addWidget( refreshButton_ );
     deviceLayout->addLayout( deviceRow );
@@ -195,6 +197,7 @@ DeviceWidget::DeviceWidget( QWidget* parent )
                      hostLog( LOGSQUIRL_LOG_WARNING,
                               "adb devices could not be started: " + scanProcess_->errorString() );
                      setDevices( {} );
+                     onScanEnded();
                  }
              } );
 
@@ -356,7 +359,8 @@ bool DeviceWidget::isSessionActive( const QString& serial ) const
 void DeviceWidget::refreshDevices()
 {
     if ( scanProcess_->state() != QProcess::NotRunning ) {
-        return; // the running scan will report shortly
+        rescanPending_ = true;
+        return;
     }
 
     const auto adb = AdbProcess::findAdb();
@@ -372,6 +376,20 @@ void DeviceWidget::refreshDevices()
     // inside start(), and that handler stops the timeout.
     scanTimeout_->start();
     scanProcess_->start();
+    updateRefreshButton();
+}
+
+void DeviceWidget::restartDeviceScan()
+{
+    if ( scanProcess_->state() != QProcess::NotRunning ) {
+        // Its result is not wanted, not even as an empty list.
+        const QSignalBlocker blocker( scanProcess_ );
+        scanTimeout_->stop();
+        scanProcess_->kill();
+        scanProcess_->waitForFinished( 1000 );
+    }
+    rescanPending_ = false;
+    refreshDevices();
 }
 
 void DeviceWidget::onScanFinished( int exitCode, QProcess::ExitStatus exitStatus )
@@ -393,6 +411,25 @@ void DeviceWidget::onScanFinished( int exitCode, QProcess::ExitStatus exitStatus
     }
 
     setDevices( found );
+    onScanEnded();
+}
+
+void DeviceWidget::onScanEnded()
+{
+    if ( rescanPending_ ) {
+        rescanPending_ = false;
+        refreshDevices();
+    }
+    else {
+        updateRefreshButton();
+    }
+}
+
+void DeviceWidget::updateRefreshButton()
+{
+    const bool scanning = scanProcess_->state() != QProcess::NotRunning;
+    refreshButton_->setEnabled( !scanning );
+    refreshButton_->setText( scanning ? "Scanning…" : "⟳ Refresh" );
 }
 
 void DeviceWidget::setDevices( const QStringList& devices )
@@ -551,7 +588,7 @@ void DeviceWidget::configureAdbPath()
         hostLog( LOGSQUIRL_LOG_INFO, newPath.isEmpty()
                                          ? "ADB path override cleared — using auto-detection."
                                          : "ADB path set to: " + newPath );
-        refreshDevices();
+        restartDeviceScan();
     }
 }
 

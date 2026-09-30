@@ -37,6 +37,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QProcess>
+#include <QPushButton>
 #include <QTemporaryDir>
 #include <QTimer>
 
@@ -479,13 +480,60 @@ SCENARIO( "devices are discovered in the background", "[devicewidget]" )
                 widget.refreshDevices();
                 widget.refreshDevices();
 
-                THEN( "they are folded into the running scan" )
+                THEN( "they are folded into one more scan after the running one" )
                 {
-                    REQUIRE( waitFor( [ &changes ]() { return changes == 1; } ) );
-                    logcat_test::processEventsFor( 1500 ); // time for a second scan
-                    REQUIRE( changes == 1 );
-                    REQUIRE( host.logs.filter( "Discovered" ).size() == 1 );
+                    REQUIRE( waitFor( [ &changes ]() { return changes == 2; }, 8000 ) );
+                    logcat_test::processEventsFor( 1500 ); // time for a third scan
+                    REQUIRE( changes == 2 );
+                    REQUIRE( host.logs.filter( "Discovered" ).size() == 2 );
                 }
+            }
+        }
+    }
+
+    GIVEN( "a widget whose device scan is running" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb(
+            host, "exec sleep 30\n",
+            "sleep 1\nprintf 'List of devices attached\\nemulator-5554\\tdevice\\n\\n'\n" );
+        DeviceWidget widget;
+        auto* refresh = widget.findChild<QPushButton*>( "refresh" );
+        REQUIRE( refresh != nullptr );
+
+        THEN( "the Refresh button shows that it is scanning until the scan ends" )
+        {
+            REQUIRE_FALSE( refresh->isEnabled() );
+            REQUIRE( waitFor( [ &widget ]() { return !widget.devices().isEmpty(); } ) );
+            REQUIRE( refresh->isEnabled() );
+        }
+    }
+
+    GIVEN( "a widget whose device scan hangs" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host, "exec sleep 30\n", "exec sleep 30\n" );
+        DeviceWidget widget;
+        int changes = 0;
+        QObject::connect( &widget, &DeviceWidget::devicesChanged, [ &changes ]() { ++changes; } );
+
+        WHEN( "the ADB path changes to a working adb" )
+        {
+            const auto workingAdb = host.configDir() + "/other-adb";
+            {
+                QFile file( workingAdb );
+                REQUIRE( file.open( QIODevice::WriteOnly ) );
+                file.write( "#!/bin/sh\n"
+                            "printf 'List of devices attached\\nemulator-5556\\tdevice\\n\\n'\n" );
+                file.setPermissions( file.permissions() | QFileDevice::ExeOwner );
+            }
+            logcat_test::useAdb( host, workingAdb );
+            widget.restartDeviceScan();
+
+            THEN( "the hanging scan is abandoned and the new adb's devices arrive" )
+            {
+                REQUIRE( waitFor( [ &changes ]() { return changes == 1; }, 3000 ) );
+                REQUIRE( widget.devices() == QStringList{ "emulator-5556" } );
             }
         }
     }

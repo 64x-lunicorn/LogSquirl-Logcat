@@ -26,8 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Device discovery no longer freezes LogSquirl: `adb devices` runs in the
   background instead of blocking the UI for up to 10 seconds, twice at
   startup and two or three times per Start or Stop. Starting and stopping
-  a session no longer rescan at all, and refreshes requested while a scan
-  is running share its result.
+  a session no longer rescan at all. Refreshes requested while a scan is
+  running are combined into one more scan after it, the Refresh button
+  shows "Scanning…" meanwhile, and changing the ADB path abandons a
+  running scan for one with the new path.
 - On Windows, an adb that cannot be started no longer logs a false "adb
   devices timed out" 10 seconds later, and closing the dialog while a
   device scan runs kills the scan instead of leaving it to Qt.

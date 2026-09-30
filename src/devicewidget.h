@@ -134,10 +134,17 @@ public Q_SLOTS:
     /**
      * Re-scan for ADB devices.  `adb devices` runs in the background
      * (starting the ADB server can take seconds); devicesChanged() is
-     * emitted when it has finished.  While a scan is running, further
-     * requests are folded into it.
+     * emitted when it has finished.  Requests made while a scan is
+     * running are folded into one more scan after it: the running scan
+     * may have started before whatever prompted the request.
      */
     void refreshDevices();
+
+    /**
+     * Abandon a running device scan and start a new one, e.g. because the
+     * ADB path has changed and the running scan's result would be stale.
+     */
+    void restartDeviceScan();
 
 Q_SIGNALS:
     /** Emitted when a device scan has finished and devices() is updated. */
@@ -178,6 +185,12 @@ private:
     /** Store the result of a scan and announce it. */
     void setDevices( const QStringList& devices );
 
+    /** Run the rescan requested during the scan that has just ended. */
+    void onScanEnded();
+
+    /** Show on the Refresh button whether a scan is running. */
+    void updateRefreshButton();
+
     /** Return the serial of the currently selected device, or empty string. */
     QString currentSerial() const;
 
@@ -209,6 +222,7 @@ private:
     QProcess* scanProcess_ = nullptr; ///< Runs `adb devices`.
     QTimer* scanTimeout_ = nullptr;   ///< Gives up on a hanging scan.
     QStringList devices_;             ///< Result of the last scan.
+    bool rescanPending_ = false;      ///< Scan again when the running scan ends.
 
     // ── Active sessions (serial → AdbProcess*) ──────────────────────
     QMap<QString, AdbProcess*> sessions_;
