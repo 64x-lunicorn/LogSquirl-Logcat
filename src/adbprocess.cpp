@@ -44,6 +44,7 @@
 
 #include "adbprocess.h"
 #include "plugin.h"
+#include "tempdirs.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -74,6 +75,7 @@ AdbProcess::AdbProcess( const QString& serial, const QString& savePath, QObject*
     : QObject( parent )
     , serial_( serial )
     , savePath_( savePath )
+    , tempDir_( tempDirTemplate( tempRoot() ) )
 {
     // Connect QProcess signals to our slots
     connect( &process_, &QProcess::readyReadStandardOutput, this, &AdbProcess::onReadyRead );
@@ -351,11 +353,6 @@ QString AdbProcess::preserveTempFile()
     }
     tempDir_.setAutoRemove( false );
     return tempDir_.path();
-}
-
-void AdbProcess::removeTempFiles()
-{
-    tempDir_.remove();
 }
 
 QString AdbProcess::rotateLog()

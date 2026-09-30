@@ -38,6 +38,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QInputDialog>
+#include <QTemporaryDir>
 #include <QTimer>
 #include <QWidget>
 #include <QWindow>
@@ -146,20 +147,24 @@ QString dirOf( const QString& file )
     return QFileInfo( file ).absolutePath();
 }
 
-/** Start a session, stop it, and start another, all in temp-file mode. */
+/**
+ * Start a session, stop it, and start another, which is rotated, all in
+ * temp-file mode: three tabs, in two directories.
+ */
 void startStopAndStartAgain()
 {
     auto* widget = logcat::g_state.dialog;
     REQUIRE( widget->startSession( "emulator-5554" ) );
     widget->stopSession( "emulator-5554" );
     REQUIRE( widget->startSession( "emulator-5556" ) );
+    widget->rotateSession( "emulator-5556" );
 }
 
 } // namespace
 
 SCENARIO( "temporary files are removed only when LogSquirl quits", "[plugin]" )
 {
-    GIVEN( "an initialised plugin with a stopped and a running temp-file session" )
+    GIVEN( "an initialised plugin with a stopped and a running, rotated temp-file session" )
     {
         FakeHost host;
         logcat_test::installFakeAdb( host );
@@ -167,9 +172,18 @@ SCENARIO( "temporary files are removed only when LogSquirl quits", "[plugin]" )
         auto* handle = logcat::g_state.handle;
         REQUIRE( logsquirl_plugin_init( api, handle ) == 0 );
         startStopAndStartAgain();
-        REQUIRE( host.openedFiles.size() == 2 );
+        REQUIRE( host.openedFiles.size() == 3 );
         const auto stoppedDir = dirOf( host.openedFiles.first() );
         const auto runningDir = dirOf( host.openedFiles.last() );
+        REQUIRE( dirOf( host.openedFiles.at( 1 ) ) == runningDir );
+        // Named after the process, in the temporary root
+        const auto prefix
+            = QString( "logsquirl-logcat-%1-" ).arg( QCoreApplication::applicationPid() );
+        for ( const auto& dir : { stoppedDir, runningDir } ) {
+            REQUIRE( QFileInfo( dir ).fileName().startsWith( prefix ) );
+            REQUIRE( QFileInfo( dirOf( dir ) ).canonicalFilePath()
+                     == QFileInfo( host.tempRoot() ).canonicalFilePath() );
+        }
 
         WHEN( "LogSquirl quits, which shuts the plugin down" )
         {
@@ -209,9 +223,129 @@ SCENARIO( "temporary files are removed only when LogSquirl quits", "[plugin]" )
                 REQUIRE( QFileInfo::exists( host.openedFiles.last() ) );
             }
 
-            QDir( stoppedDir ).removeRecursively();
-            QDir( runningDir ).removeRecursively();
+            AND_WHEN( "it is enabled again, and LogSquirl quits later" )
+            {
+                REQUIRE( logsquirl_plugin_init( api, handle ) == 0 );
+                QMetaObject::invokeMethod( QCoreApplication::instance(), "aboutToQuit" );
+                logsquirl_plugin_shutdown();
+
+                THEN( "the new instance removes the files the earlier one left for its tabs" )
+                {
+                    REQUIRE_FALSE( QFileInfo::exists( stoppedDir ) );
+                    REQUIRE_FALSE( QFileInfo::exists( runningDir ) );
+                    REQUIRE( QDir( host.tempRoot() ).isEmpty() );
+                }
+            }
+        }
+    }
+}
+
+SCENARIO( "save paths are never removed", "[plugin]" )
+{
+    GIVEN( "a stopped and a rotated session that write to save paths below the temporary root" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        REQUIRE( logsquirl_plugin_init( logcat::g_state.api, logcat::g_state.handle ) == 0 );
+        auto* widget = logcat::g_state.dialog;
+        const auto logDir = host.tempRoot() + "/logs";
+        const auto stoppedPath = logDir + "/stopped.log";
+        const auto rotatedPath = logDir + "/rotated.log";
+        REQUIRE( widget->startSession( "emulator-5554", stoppedPath ) );
+        widget->stopSession( "emulator-5554" );
+        REQUIRE( widget->startSession( "emulator-5556", rotatedPath ) );
+        widget->rotateSession( "emulator-5556" );
+        const auto files = QDir( logDir ).entryList( QDir::Files );
+        REQUIRE( files.size() == 3 );
+
+        WHEN( "LogSquirl quits, which shuts the plugin down" )
+        {
+            QMetaObject::invokeMethod( QCoreApplication::instance(), "aboutToQuit" );
+            logsquirl_plugin_shutdown();
+
+            THEN( "every file in the log directory is kept" )
+            {
+                REQUIRE( QDir( logDir ).entryList( QDir::Files ) == files );
+            }
         }
     }
 }
 #endif
+
+SCENARIO( "temporary directories of LogSquirl processes that ended are swept", "[plugin]" )
+{
+    GIVEN( "directories left by a process that ended, and by one that runs" )
+    {
+        FakeHost host;
+        const QDir root( host.tempRoot() );
+        // No process has this ID: PIDs stay far below it on Linux and macOS,
+        // and on Windows it is a multiple of 4 no process gets in practice.
+        const QString dead = "logsquirl-logcat-2147483644-AbC123";
+#ifdef Q_OS_WIN
+        const QString alive = "logsquirl-logcat-4-AbC123"; // the System process
+#else
+        const QString alive = "logsquirl-logcat-1-AbC123"; // init / launchd
+#endif
+        const QString unrelated = "logsquirl-logcat-notapid";
+        for ( const auto& name : { dead, alive, unrelated } ) {
+            REQUIRE( root.mkpath( name + "/sub" ) );
+            QFile file( root.filePath( name + "/sub/logcat.log" ) );
+            REQUIRE( file.open( QIODevice::WriteOnly ) );
+        }
+
+        WHEN( "the plugin is initialised" )
+        {
+            logcat_test::installBrokenAdb( host ); // no real adb scan
+            REQUIRE( logsquirl_plugin_init( logcat::g_state.api, logcat::g_state.handle ) == 0 );
+            logsquirl_plugin_shutdown();
+
+            THEN( "only the ended process's directory is removed" )
+            {
+                REQUIRE_FALSE( root.exists( dead ) );
+                REQUIRE( root.exists( alive + "/sub/logcat.log" ) );
+                REQUIRE( root.exists( unrelated + "/sub/logcat.log" ) );
+            }
+        }
+
+        WHEN( "the plugin shuts down as LogSquirl quits" )
+        {
+            logcat_test::installBrokenAdb( host );
+            REQUIRE( logsquirl_plugin_init( logcat::g_state.api, logcat::g_state.handle ) == 0 );
+            QMetaObject::invokeMethod( QCoreApplication::instance(), "aboutToQuit" );
+            logsquirl_plugin_shutdown();
+
+            THEN( "another running process's directory is kept" )
+            {
+                REQUIRE( root.exists( alive + "/sub/logcat.log" ) );
+                REQUIRE( root.exists( unrelated + "/sub/logcat.log" ) );
+            }
+        }
+    }
+
+#ifdef Q_OS_UNIX
+    GIVEN( "a link named like an ended process's directory, to a directory elsewhere" )
+    {
+        FakeHost host;
+        QTemporaryDir target;
+        REQUIRE( target.isValid() );
+        QFile file( target.filePath( "keep.log" ) );
+        REQUIRE( file.open( QIODevice::WriteOnly ) );
+        file.close();
+        const QDir root( host.tempRoot() );
+        const QString link = "logsquirl-logcat-2147483644-AbC123";
+        REQUIRE( QFile::link( target.path(), root.filePath( link ) ) );
+
+        WHEN( "the plugin is initialised" )
+        {
+            logcat_test::installBrokenAdb( host );
+            REQUIRE( logsquirl_plugin_init( logcat::g_state.api, logcat::g_state.handle ) == 0 );
+            logsquirl_plugin_shutdown();
+
+            THEN( "the link is not followed" )
+            {
+                REQUIRE( QFileInfo::exists( target.filePath( "keep.log" ) ) );
+            }
+        }
+    }
+#endif
+}

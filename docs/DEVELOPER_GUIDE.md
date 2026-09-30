@@ -464,7 +464,17 @@ paths as a fallback (e.g. `/opt/homebrew/bin/adb` on macOS).
 ### Temp files
 
 Use `QTemporaryDir` for temp files — Qt handles platform-specific temp
-directory resolution automatically.
+directory resolution automatically, and creates the directory so that only
+you can enter it.
+
+Name the directory after the process (`src/tempdirs.h`):
+`logsquirl-logcat-<pid>-XXXXXX`. The host shuts the plugin down both when
+LogSquirl quits and when the plugin is disabled or updated at runtime, and
+in the second case the tabs stay open, so the files must too. A plugin
+instance loaded later knows nothing of the files of the one before, but the
+process ID in the name does: when LogSquirl quits, the plugin removes every
+directory with its own process ID, and at `init()` those whose process no
+longer runs, e.g. after a crash.
 
 ---
 

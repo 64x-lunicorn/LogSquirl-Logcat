@@ -398,7 +398,7 @@ SCENARIO( "a failed rotation is reported once", "[devicewidget]" )
 #endif
 
 #ifdef Q_OS_UNIX
-SCENARIO( "stopAll decides whether temporary log files survive", "[devicewidget]" )
+SCENARIO( "stopAll keeps temporary log files for their tabs", "[devicewidget]" )
 {
     GIVEN( "a session writing to a temporary file" )
     {
@@ -410,26 +410,10 @@ SCENARIO( "stopAll decides whether temporary log files survive", "[devicewidget]
         const auto tempFile = host.openedFiles.first();
         const auto scansBefore = host.logs.filter( "Discovered" ).size();
 
-        WHEN( "LogSquirl quits: stopAll( TempFiles::Remove ), then the widget is deleted" )
-        {
-            widget->stopAll( DeviceWidget::TempFiles::Remove );
-            const auto scansDuringStop = host.logs.filter( "Discovered" ).size() - scansBefore;
-            delete widget;
-
-            THEN( "the temporary file is removed" )
-            {
-                REQUIRE_FALSE( QFileInfo::exists( tempFile ) );
-            }
-
-            THEN( "the devices are not scanned again for the stopped session" )
-            {
-                REQUIRE( scansDuringStop == 0 );
-            }
-        }
-
         WHEN( "the user stops all sessions: stopAll(), then the widget is deleted" )
         {
             widget->stopAll();
+            const auto scansDuringStop = host.logs.filter( "Discovered" ).size() - scansBefore;
             delete widget;
 
             THEN( "the temporary file is kept for its tab" )
@@ -437,55 +421,9 @@ SCENARIO( "stopAll decides whether temporary log files survive", "[devicewidget]
                 REQUIRE( QFileInfo::exists( tempFile ) );
             }
 
-            QDir( QFileInfo( tempFile ).absolutePath() ).removeRecursively();
-        }
-    }
-
-    GIVEN( "a temporary-file session that was stopped before another one started" )
-    {
-        FakeHost host;
-        logcat_test::installFakeAdb( host );
-        auto* widget = new DeviceWidget;
-        REQUIRE( widget->startSession( "emulator-5554" ) );
-        widget->stopSession( "emulator-5554" );
-        REQUIRE( widget->startSession( "emulator-5556" ) );
-        REQUIRE( host.openedFiles.size() == 2 );
-        const auto stoppedDir = QFileInfo( host.openedFiles.first() ).absolutePath();
-        const auto runningDir = QFileInfo( host.openedFiles.last() ).absolutePath();
-        REQUIRE( stoppedDir != runningDir );
-        REQUIRE( QFileInfo::exists( stoppedDir ) );
-
-        WHEN( "LogSquirl quits: stopAll( TempFiles::Remove ), then the widget is deleted" )
-        {
-            widget->stopAll( DeviceWidget::TempFiles::Remove );
-            delete widget;
-
-            THEN( "the temporary directories of both sessions are removed" )
+            THEN( "the devices are not scanned again for the stopped session" )
             {
-                REQUIRE_FALSE( QFileInfo::exists( stoppedDir ) );
-                REQUIRE_FALSE( QFileInfo::exists( runningDir ) );
-            }
-        }
-    }
-
-    GIVEN( "a stopped session that wrote to a save path" )
-    {
-        FakeHost host;
-        logcat_test::installFakeAdb( host );
-        auto* widget = new DeviceWidget;
-        QTemporaryDir logDir;
-        const auto savePath = logDir.filePath( "capture.log" );
-        REQUIRE( widget->startSession( "emulator-5554", savePath ) );
-        widget->stopSession( "emulator-5554" );
-
-        WHEN( "the plugin shuts down" )
-        {
-            widget->stopAll( DeviceWidget::TempFiles::Remove );
-            delete widget;
-
-            THEN( "the save file is kept" )
-            {
-                REQUIRE( QFileInfo::exists( savePath ) );
+                REQUIRE( scansDuringStop == 0 );
             }
         }
     }
@@ -498,19 +436,8 @@ SCENARIO( "stopAll decides whether temporary log files survive", "[devicewidget]
         REQUIRE( widget->startSession( "emulator-5554" ) );
         widget->rotateSession( "emulator-5554" );
         REQUIRE( host.openedFiles.size() == 2 );
-        const auto tempDir = QFileInfo( host.openedFiles.first() ).absolutePath();
-        REQUIRE( QFileInfo( host.openedFiles.last() ).absolutePath() == tempDir );
-
-        WHEN( "LogSquirl quits: stopAll( TempFiles::Remove ), then the widget is deleted" )
-        {
-            widget->stopAll( DeviceWidget::TempFiles::Remove );
-            delete widget;
-
-            THEN( "the temporary directory is removed with the files of both tabs" )
-            {
-                REQUIRE_FALSE( QFileInfo::exists( tempDir ) );
-            }
-        }
+        REQUIRE( QFileInfo( host.openedFiles.last() ).absolutePath()
+                 == QFileInfo( host.openedFiles.first() ).absolutePath() );
 
         WHEN( "the user stops all sessions: stopAll(), then the widget is deleted" )
         {
@@ -522,8 +449,6 @@ SCENARIO( "stopAll decides whether temporary log files survive", "[devicewidget]
                 REQUIRE( QFileInfo::exists( host.openedFiles.first() ) );
                 REQUIRE( QFileInfo::exists( host.openedFiles.last() ) );
             }
-
-            QDir( tempDir ).removeRecursively();
         }
     }
 }

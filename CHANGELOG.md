@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while the files of earlier and rotated sessions were never removed at
   all. Save paths and files in the log directory are never removed. Shutdown also rescanned the
   devices once per session, blocking it.
+- Temporary log files are now also removed when LogSquirl quits after the
+  plugin was disabled and enabled again, or updated, while it kept running.
+  The new plugin did not know the files the earlier one had kept for its
+  tabs, so they stayed for good. Their directories are now named
+  `logsquirl-logcat-<pid>-XXXXXX` after the LogSquirl process, and at quit
+  the plugin removes every one with its own process ID. Directories left
+  behind by a LogSquirl that no longer runs, e.g. after a crash, are removed
+  when the plugin starts; those of a running LogSquirl, links and, on Unix,
+  other users' directories are left alone.
 - Device discovery no longer freezes LogSquirl: `adb devices` runs in the
   background instead of blocking the UI for up to 10 seconds, twice at
   startup and two or three times per Start or Stop. Starting and stopping
