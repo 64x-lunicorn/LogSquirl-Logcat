@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A session whose adb cannot be launched is no longer listed as active
   with nothing running: the error is shown once, no tab is opened, and
   no empty log file is left behind.
+- Stopping a session no longer shows an "ADB process crashed" error on
+  macOS and Linux, where adb ends from the stop signal.
 - Starting, stopping and rotating never truncate an existing log file.
   A save path is appended to, so Stop and Start keep the earlier capture;
   generated file names get a `_2`, `_3`, … suffix when a file of that

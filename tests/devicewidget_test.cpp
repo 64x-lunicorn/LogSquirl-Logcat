@@ -125,3 +125,28 @@ SCENARIO( "two sessions never write to the same file", "[devicewidget]" )
     }
 }
 #endif
+
+#ifdef Q_OS_UNIX
+SCENARIO( "stopping a session is not reported as an error", "[devicewidget]" )
+{
+    GIVEN( "a running session" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        DeviceWidget widget;
+        REQUIRE( widget.startSession( "emulator-5554" ) );
+        host.notifications.clear();
+
+        WHEN( "the user stops it" )
+        {
+            widget.stopSession( "emulator-5554" );
+
+            THEN( "the only notification says it stopped" )
+            {
+                REQUIRE( host.notifications.size() == 1 );
+                REQUIRE( host.notifications.first().startsWith( "Logcat stopped" ) );
+            }
+        }
+    }
+}
+#endif

@@ -260,6 +260,7 @@ private:
     int rotationCount_ = 0;       ///< Incremented on each rotateLog() call.
     bool usingSavePath_ = false;  ///< True when writing directly to the log directory.
     bool createdLogFile_ = false; ///< True when start() created the log file.
+    bool stopping_ = false;       ///< True while stop() ends the process.
 };
 
 } // namespace logcat

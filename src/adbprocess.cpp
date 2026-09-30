@@ -322,11 +322,15 @@ void AdbProcess::stop()
         return;
     }
 
+    // adb exits from the signal, which QProcess reports as a crash.  That
+    // is expected here and must not reach the user as an error.
+    stopping_ = true;
     process_.terminate();
     if ( !process_.waitForFinished( 3000 ) ) {
         process_.kill();
         process_.waitForFinished( 1000 );
     }
+    stopping_ = false;
 
     tempFile_.close();
 
@@ -447,7 +451,7 @@ void AdbProcess::onFinished( int exitCode, QProcess::ExitStatus exitStatus )
 
     tempFile_.close();
 
-    if ( exitStatus == QProcess::CrashExit ) {
+    if ( exitStatus == QProcess::CrashExit && !stopping_ ) {
         hostLog( LOGSQUIRL_LOG_WARNING,
                  QString( "Logcat process for %1 crashed." ).arg( serial_ ) );
     }
@@ -457,6 +461,10 @@ void AdbProcess::onFinished( int exitCode, QProcess::ExitStatus exitStatus )
 
 void AdbProcess::onErrorOccurred( QProcess::ProcessError error )
 {
+    if ( stopping_ ) {
+        return;
+    }
+
     QString message;
     switch ( error ) {
     case QProcess::FailedToStart:
