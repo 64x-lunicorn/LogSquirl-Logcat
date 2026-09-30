@@ -204,6 +204,23 @@ QStringList AdbProcess::parseDeviceList( const QByteArray& output )
     return devices;
 }
 
+QList<QByteArray> AdbProcess::takeLines( QByteArray& buffer )
+{
+    QList<QByteArray> lines;
+    qsizetype start = 0;
+    for ( auto end = buffer.indexOf( '\n' ); end >= 0; end = buffer.indexOf( '\n', start ) ) {
+        auto line = buffer.mid( start, end - start );
+        // adb on Windows, and some devices, end lines with "\r\n"
+        if ( line.endsWith( '\r' ) ) {
+            line.chop( 1 );
+        }
+        lines.append( line );
+        start = end + 1;
+    }
+    buffer.remove( 0, start );
+    return lines;
+}
+
 // ── Instance: start / stop ──────────────────────────────────────────────
 
 void AdbProcess::start()
@@ -293,13 +310,7 @@ QString AdbProcess::rotateLog()
     }
 
     // Flush any pending partial line to the old file before rotating
-    if ( !readBuffer_.isEmpty() ) {
-        tempFile_.write( readBuffer_ );
-        tempFile_.write( "\n", 1 );
-        tempFile_.flush();
-        ++lineCount_;
-        readBuffer_.clear();
-    }
+    flushPartialLine();
 
     // Close the old temp file (it stays on disk for the old tab)
     tempFile_.close();
@@ -345,46 +356,46 @@ QString AdbProcess::tempFilePath() const
     return tempFile_.fileName();
 }
 
+// ── Private helpers ─────────────────────────────────────────────────────
+
+void AdbProcess::writeLine( const QByteArray& line )
+{
+    tempFile_.write( line );
+    tempFile_.write( "\n", 1 );
+    ++lineCount_;
+}
+
+void AdbProcess::flushPartialLine()
+{
+    if ( readBuffer_.isEmpty() ) {
+        return;
+    }
+
+    if ( readBuffer_.endsWith( '\r' ) ) {
+        readBuffer_.chop( 1 );
+    }
+    writeLine( readBuffer_ );
+    tempFile_.flush();
+    readBuffer_.clear();
+}
+
 // ── Private slots ───────────────────────────────────────────────────────
 
 void AdbProcess::onReadyRead()
 {
-    // Append new data to the read buffer
     readBuffer_.append( process_.readAllStandardOutput() );
 
-    // Process complete lines (split on '\n')
-    int start = 0;
-    for ( int i = 0; i < readBuffer_.size(); ++i ) {
-        if ( readBuffer_[ i ] == '\n' ) {
-            const auto lineData = readBuffer_.mid( start, i - start );
-            start = i + 1;
-
-            // Write to temp file (with newline)
-            tempFile_.write( lineData );
-            tempFile_.write( "\n", 1 );
-            tempFile_.flush();
-
-            ++lineCount_;
-        }
+    const auto lines = takeLines( readBuffer_ );
+    for ( const auto& line : lines ) {
+        writeLine( line );
     }
-
-    // Keep any incomplete trailing line in the buffer
-    if ( start > 0 ) {
-        readBuffer_.remove( 0, start );
-    }
+    tempFile_.flush();
 }
 
 void AdbProcess::onFinished( int exitCode, QProcess::ExitStatus exitStatus )
 {
     // Flush any remaining partial line in the buffer
-    if ( !readBuffer_.isEmpty() ) {
-        tempFile_.write( readBuffer_ );
-        tempFile_.write( "\n", 1 );
-        tempFile_.flush();
-
-        ++lineCount_;
-        readBuffer_.clear();
-    }
+    flushPartialLine();
 
     tempFile_.close();
 

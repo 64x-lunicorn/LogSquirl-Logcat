@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Log messages and notifications reach LogSquirl as UTF-8, so non-ASCII
   device names and paths are no longer garbled on systems whose local
   8-bit encoding is not UTF-8.
+- Lines that adb terminates with `\r\n` no longer keep a stray carriage
+  return in the log file.
 
 ## [0.3.0] — 2026-04-02
 

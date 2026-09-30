@@ -117,6 +117,19 @@ public:
     static QStringList parseDeviceList( const QByteArray& output );
 
     /**
+     * Remove every complete line from the front of @p buffer and return
+     * the lines, without their "\n" or "\r\n" terminator.  An incomplete
+     * last line stays in the buffer until more data arrives.
+     *
+     * Extracted as a static helper so unit tests can exercise the line
+     * splitting without running a real ADB process.
+     *
+     * @param buffer  Bytes read from adb so far; complete lines are removed.
+     * @return The complete lines, in order.
+     */
+    static QList<QByteArray> takeLines( QByteArray& buffer );
+
+    /**
      * Return the plugin's config directory from the host API.
      * Falls back to a temp path if the plugin is not initialised.
      */
@@ -199,6 +212,12 @@ private Q_SLOTS:
     void onErrorOccurred( QProcess::ProcessError error );
 
 private:
+    /** Write one line to the log file, terminated by "\n". */
+    void writeLine( const QByteArray& line );
+
+    /** Write out a buffered partial line, e.g. before the file is closed. */
+    void flushPartialLine();
+
     QString serial_;
     QString savePath_;
 
