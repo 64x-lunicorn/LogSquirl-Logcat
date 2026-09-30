@@ -378,6 +378,7 @@ void DeviceWidget::refreshDevices()
     if ( adb.isEmpty() ) {
         hostLog( LOGSQUIRL_LOG_WARNING, "adb not found — cannot discover devices." );
         setDevices( {} );
+        updateRefreshButton(); // a scan that ended just before may have left it "Scanning…"
         return;
     }
 

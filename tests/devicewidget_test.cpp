@@ -41,6 +41,8 @@
 #include <QTemporaryDir>
 #include <QTimer>
 
+#include <array>
+
 using logcat::DeviceWidget;
 using logcat_test::FakeHost;
 using logcat_test::waitFor;
@@ -88,6 +90,42 @@ QTimer* scanTimeoutOf( const DeviceWidget& widget )
     }
     return nullptr;
 }
+
+/**
+ * Hides adb from the PATH and the SDK environment variables while it
+ * exists, so that findAdb() only finds one in a well-known location.
+ */
+class NoAdbAnywhere {
+public:
+    NoAdbAnywhere()
+    {
+        for ( const auto* name : kNames ) {
+            saved_.append( qgetenv( name ) );
+            qunsetenv( name );
+        }
+        qputenv( "PATH", "/nonexistent" );
+    }
+
+    ~NoAdbAnywhere()
+    {
+        for ( size_t i = 0; i < kNames.size(); ++i ) {
+            if ( saved_[ static_cast<qsizetype>( i ) ].isNull() ) {
+                qunsetenv( kNames[ i ] );
+            }
+            else {
+                qputenv( kNames[ i ], saved_[ static_cast<qsizetype>( i ) ] );
+            }
+        }
+    }
+
+    NoAdbAnywhere( const NoAdbAnywhere& ) = delete;
+    NoAdbAnywhere& operator=( const NoAdbAnywhere& ) = delete;
+
+private:
+    static constexpr std::array<const char*, 3> kNames
+        = { "PATH", "ANDROID_HOME", "ANDROID_SDK_ROOT" };
+    QList<QByteArray> saved_;
+};
 
 } // namespace
 
@@ -583,6 +621,26 @@ SCENARIO( "devices are discovered in the background", "[devicewidget]" )
             {
                 REQUIRE( waitFor( [ &changes ]() { return changes == 1; }, 3000 ) );
                 REQUIRE( widget.devices() == QStringList{ "emulator-5556" } );
+            }
+        }
+
+        WHEN( "the ADB path changes to one where no adb can be found" )
+        {
+            const NoAdbAnywhere noAdb;
+            logcat_test::useAdb( host, host.configDir() + "/missing-adb" );
+            if ( !logcat::AdbProcess::findAdb().isEmpty() ) {
+                WARN( "An adb is installed in a well-known location; skipped." );
+                return;
+            }
+            auto* refresh = widget.findChild<QPushButton*>( "refresh" );
+            REQUIRE( refresh != nullptr );
+            REQUIRE_FALSE( refresh->isEnabled() );
+            widget.restartDeviceScan();
+
+            THEN( "the Refresh button is usable again" )
+            {
+                REQUIRE( refresh->isEnabled() );
+                REQUIRE_FALSE( refresh->text().contains( "Scanning" ) );
             }
         }
     }
