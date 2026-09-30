@@ -234,5 +234,94 @@ SCENARIO( "start reports whether adb could be launched", "[adbprocess]" )
             }
         }
     }
+
+    GIVEN( "a working adb and a save path that already holds a capture" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        QTemporaryDir logDir;
+        const auto savePath = logDir.filePath( "capture.log" );
+        {
+            QFile existing( savePath );
+            REQUIRE( existing.open( QIODevice::WriteOnly ) );
+            existing.write( "earlier capture\n" );
+        }
+
+        AdbProcess proc( "emulator-5554", savePath );
+
+        WHEN( "the session runs" )
+        {
+            REQUIRE( proc.start() );
+            REQUIRE( waitFor( [ &proc ]() { return proc.lineCount() == 2; } ) );
+
+            THEN( "the new output is appended to the earlier capture" )
+            {
+                REQUIRE( readFile( savePath ) == "earlier capture\nfirst\nsecond\n" );
+            }
+        }
+    }
 #endif
 }
+
+#ifdef Q_OS_UNIX
+SCENARIO( "rotateLog moves the capture to a new file", "[adbprocess]" )
+{
+    GIVEN( "a running session writing to a generated file in the log directory" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        QTemporaryDir logDir;
+        const auto savePath = AdbProcess::generateLogPath( logDir.path(), "emulator-5554" );
+
+        AdbProcess proc( "emulator-5554", savePath );
+        REQUIRE( proc.start() );
+        REQUIRE( waitFor( [ &proc ]() { return proc.lineCount() == 2; } ) );
+
+        WHEN( "rotating within the same second" )
+        {
+            const auto newPath = proc.rotateLog();
+
+            THEN( "the capture continues in a different file" )
+            {
+                REQUIRE_FALSE( newPath.isEmpty() );
+                REQUIRE( newPath != savePath );
+                REQUIRE( proc.tempFilePath() == newPath );
+                REQUIRE( QFileInfo::exists( newPath ) );
+            }
+
+            THEN( "the old file keeps its content" )
+            {
+                REQUIRE( readFile( savePath ) == "first\nsecond\n" );
+            }
+        }
+    }
+
+    GIVEN( "a running session writing to a temporary file" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+
+        AdbProcess proc( "192.168.1.5:5555" );
+        REQUIRE( proc.start() );
+        REQUIRE( waitFor( [ &proc ]() { return proc.lineCount() == 2; } ) );
+        const auto oldPath = proc.tempFilePath();
+
+        WHEN( "rotating" )
+        {
+            const auto newPath = proc.rotateLog();
+
+            THEN( "neither file name contains the serial's ':'" )
+            {
+                REQUIRE_FALSE( newPath.isEmpty() );
+                REQUIRE_FALSE( QFileInfo( oldPath ).fileName().contains( ':' ) );
+                REQUIRE_FALSE( QFileInfo( newPath ).fileName().contains( ':' ) );
+            }
+
+            THEN( "the old file keeps its content" )
+            {
+                REQUIRE( readFile( oldPath ) == "first\nsecond\n" );
+            }
+        }
+    }
+}
+#endif

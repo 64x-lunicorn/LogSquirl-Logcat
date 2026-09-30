@@ -95,3 +95,33 @@ SCENARIO( "a session is only accepted when adb starts", "[devicewidget]" )
     }
 #endif
 }
+
+#ifdef Q_OS_UNIX
+SCENARIO( "two sessions never write to the same file", "[devicewidget]" )
+{
+    GIVEN( "a session writing to a save path" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        DeviceWidget widget;
+        QTemporaryDir logDir;
+        const auto savePath = logDir.filePath( "capture.log" );
+        REQUIRE( widget.startSession( "emulator-5554", savePath ) );
+        host.notifications.clear();
+
+        WHEN( "starting a second device with the same save path" )
+        {
+            const auto started = widget.startSession( "emulator-5556", savePath );
+
+            THEN( "the second session is refused, and the user told why" )
+            {
+                REQUIRE_FALSE( started );
+                REQUIRE_FALSE( widget.isSessionActive( "emulator-5556" ) );
+                REQUIRE( host.notifications.size() == 1 );
+            }
+        }
+
+        widget.stopAll();
+    }
+}
+#endif

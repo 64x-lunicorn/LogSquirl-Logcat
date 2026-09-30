@@ -37,12 +37,10 @@
 #include "devicewidget.h"
 #include "plugin.h"
 
-#include <QDateTime>
 #include <QDir>
 #include <QFileDialog>
 #include <QGroupBox>
 #include <QHBoxLayout>
-#include <QRegularExpression>
 #include <QSettings>
 #include <QVBoxLayout>
 
@@ -324,11 +322,7 @@ QString SidebarWidget::generateSavePath( const QString& serial ) const
     QDir().mkpath( dir );
 
     // Format: YYYY-MM-dd_HHmmss_<serial>.log
-    const auto timestamp = QDateTime::currentDateTime().toString( "yyyy-MM-dd_HHmmss" );
-    // Sanitise the serial for use as a filename component
-    auto safeName = serial;
-    safeName.replace( QRegularExpression( "[^a-zA-Z0-9._-]" ), "_" );
-    return QDir( dir ).filePath( QString( "%1_%2.log" ).arg( timestamp, safeName ) );
+    return AdbProcess::generateLogPath( dir, serial );
 }
 
 void SidebarWidget::loadLogDir()

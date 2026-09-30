@@ -16,6 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A session whose adb cannot be launched is no longer listed as active
   with nothing running: the error is shown once, no tab is opened, and
   no empty log file is left behind.
+- Starting, stopping and rotating never truncate an existing log file.
+  A save path is appended to, so Stop and Start keep the earlier capture;
+  generated file names get a `_2`, `_3`, … suffix when a file of that
+  name exists, so a rotation within the same second as the start no
+  longer wipes the capture it rotates away from.
+- A second session is refused instead of writing into the save path of
+  one that is still running.
+- Wireless devices (`192.168.1.5:5555`) get a valid temporary file name
+  on Windows: the serial's `:` is replaced, as it already was for files
+  in the log directory.
 
 ## [0.3.0] — 2026-04-02
 

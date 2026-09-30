@@ -41,6 +41,7 @@
 
 #pragma once
 
+#include <QDateTime>
 #include <QFile>
 #include <QObject>
 #include <QProcess>
@@ -130,6 +131,22 @@ public:
     static QList<QByteArray> takeLines( QByteArray& buffer );
 
     /**
+     * Return a path for a new log file in @p dir, named
+     * `<yyyy-MM-dd_HHmmss>_<serial>.log`.  Characters of the serial that
+     * are not valid in file names (the ':' of a wireless device's
+     * "192.168.1.5:5555") are replaced by '_'.  If that file exists, a
+     * number is appended (`…_2.log`, `…_3.log`, …), so that two captures
+     * within the same second never share a file.
+     *
+     * @param dir        Directory the file will be created in.
+     * @param serial     ADB device serial.
+     * @param timestamp  Time the capture starts.
+     * @return Absolute path of a file that does not exist yet.
+     */
+    static QString generateLogPath( const QString& dir, const QString& serial,
+                                    const QDateTime& timestamp = QDateTime::currentDateTime() );
+
+    /**
      * Return the plugin's config directory from the host API.
      * Falls back to a temp path if the plugin is not initialised.
      */
@@ -140,6 +157,9 @@ public:
     /**
      * Open the log file and launch the logcat process.  No-op if already
      * running.
+     *
+     * A save path is appended to, so an earlier capture in that file is
+     * never overwritten.
      *
      * On failure the reason has been emitted through errorOccurred(), and
      * a log file that start() created is removed again.

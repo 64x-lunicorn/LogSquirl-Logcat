@@ -96,6 +96,7 @@ public:
      *
      * @param serial    Device serial to capture.
      * @param savePath  Optional path to a .log file for persistent saving.
+     *                  Refused if another active session writes to it.
      * @return true if the session started successfully, false otherwise.
      */
     bool startSession( const QString& serial, const QString& savePath = {} );
@@ -151,6 +152,9 @@ private:
 
     /** Return the serial of the currently selected device, or empty string. */
     QString currentSerial() const;
+
+    /** Whether an active session writes to the file at @p path. */
+    bool isFileInUse( const QString& path ) const;
 
     // ── UI elements ──────────────────────────────────────────────────
     QComboBox* deviceCombo_ = nullptr;

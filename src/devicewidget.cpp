@@ -45,6 +45,7 @@
 #include "plugin.h"
 
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QInputDialog>
@@ -212,6 +213,16 @@ bool DeviceWidget::startSession( const QString& serial, const QString& savePath 
         return false;
     }
 
+    // Two sessions appending to one file would interleave their lines.
+    if ( !savePath.isEmpty() && isFileInUse( savePath ) ) {
+        const auto message = QString( "Logcat not started for %1: another session is already "
+                                      "writing to %2." )
+                                 .arg( serial, savePath );
+        hostLog( LOGSQUIRL_LOG_WARNING, message );
+        hostNotify( message );
+        return false;
+    }
+
     auto* proc = new AdbProcess( serial, savePath, this );
 
     connect( proc, &AdbProcess::finished, this,
@@ -351,9 +362,10 @@ void DeviceWidget::stopAllCaptures()
 
 void DeviceWidget::browseSavePath()
 {
-    const auto path
-        = QFileDialog::getSaveFileName( this, "Save logcat output", savePathEdit_->text(),
-                                        "Log files (*.log *.txt);;All files (*)" );
+    // An existing file is appended to, not replaced, so don't ask to replace it.
+    const auto path = QFileDialog::getSaveFileName(
+        this, "Save logcat output", savePathEdit_->text(), "Log files (*.log *.txt);;All files (*)",
+        nullptr, QFileDialog::DontConfirmOverwrite );
 
     if ( !path.isEmpty() ) {
         savePathEdit_->setText( path );
@@ -433,6 +445,17 @@ void DeviceWidget::configureAdbPath()
                                          : "ADB path set to: " + newPath );
         refreshDevices();
     }
+}
+
+bool DeviceWidget::isFileInUse( const QString& path ) const
+{
+    const QFileInfo file( path );
+    for ( const auto* proc : sessions_ ) {
+        if ( QFileInfo( proc->tempFilePath() ) == file ) {
+            return true;
+        }
+    }
+    return false;
 }
 
 QString DeviceWidget::currentSerial() const

@@ -55,6 +55,18 @@
 
 namespace logcat {
 
+namespace {
+
+/// Make a device serial usable as part of a file name on every platform.
+QString safeFileName( const QString& serial )
+{
+    auto name = serial;
+    name.replace( QRegularExpression( "[^a-zA-Z0-9._-]" ), "_" );
+    return name;
+}
+
+} // namespace
+
 // ── Construction / destruction ──────────────────────────────────────────
 
 AdbProcess::AdbProcess( const QString& serial, const QString& savePath, QObject* parent )
@@ -221,6 +233,19 @@ QList<QByteArray> AdbProcess::takeLines( QByteArray& buffer )
     return lines;
 }
 
+QString AdbProcess::generateLogPath( const QString& dir, const QString& serial,
+                                     const QDateTime& timestamp )
+{
+    const QDir logDir( dir );
+    const auto stem = timestamp.toString( "yyyy-MM-dd_HHmmss" ) + "_" + safeFileName( serial );
+
+    auto path = logDir.filePath( stem + ".log" );
+    for ( int n = 2; QFileInfo::exists( path ); ++n ) {
+        path = logDir.filePath( QString( "%1_%2.log" ).arg( stem ).arg( n ) );
+    }
+    return path;
+}
+
 // ── Instance: start / stop ──────────────────────────────────────────────
 
 bool AdbProcess::start()
@@ -240,22 +265,29 @@ bool AdbProcess::start()
     // When a save path is configured, write directly to the log directory
     // instead of creating a temporary file.  This avoids accumulating
     // orphaned temp files and ensures the user's log directory is used.
+    //
+    // Nothing is ever truncated: a save path is appended to, so that Stop
+    // and Start with the same path keep the earlier capture, and the temp
+    // file must be new.
     QString path;
+    QIODevice::OpenMode mode = QIODevice::WriteOnly;
     if ( !savePath_.isEmpty() ) {
         QDir().mkpath( QFileInfo( savePath_ ).absolutePath() );
         path = savePath_;
+        mode |= QIODevice::Append;
     }
     else {
         if ( !tempDir_.isValid() ) {
             Q_EMIT errorOccurred( "Failed to create temporary directory." );
             return false;
         }
-        path = tempDir_.path() + "/logcat_" + serial_ + ".log";
+        path = tempDir_.filePath( "logcat_" + safeFileName( serial_ ) + ".log" );
+        mode |= QIODevice::NewOnly;
     }
 
     createdLogFile_ = !QFileInfo::exists( path );
     tempFile_.setFileName( path );
-    if ( !tempFile_.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
+    if ( !tempFile_.open( mode ) ) {
         Q_EMIT errorOccurred( "Failed to open log file: " + tempFile_.errorString() );
         tempFile_.setFileName( {} );
         return false;
@@ -329,20 +361,18 @@ QString AdbProcess::rotateLog()
 
     // Generate the rotated file path.  When using the log directory,
     // create a new timestamped file there; otherwise use the temp dir.
+    // Either way the file must be new: opening an existing one would
+    // truncate an earlier capture.
     QString newPath;
     if ( usingSavePath_ ) {
-        const auto dir = QFileInfo( savePath_ ).absolutePath();
-        const auto timestamp = QDateTime::currentDateTime().toString( "yyyy-MM-dd_HHmmss" );
-        auto safeName = serial_;
-        safeName.replace( QRegularExpression( "[^a-zA-Z0-9._-]" ), "_" );
-        newPath = QDir( dir ).filePath( QString( "%1_%2.log" ).arg( timestamp, safeName ) );
+        newPath = generateLogPath( QFileInfo( savePath_ ).absolutePath(), serial_ );
     }
     else {
-        newPath = tempDir_.path() + "/logcat_" + serial_ + "_" + QString::number( rotationCount_ )
-                  + ".log";
+        newPath = tempDir_.filePath(
+            QString( "logcat_%1_%2.log" ).arg( safeFileName( serial_ ) ).arg( rotationCount_ ) );
     }
     tempFile_.setFileName( newPath );
-    if ( !tempFile_.open( QIODevice::WriteOnly | QIODevice::Truncate ) ) {
+    if ( !tempFile_.open( QIODevice::WriteOnly | QIODevice::NewOnly ) ) {
         hostLog( LOGSQUIRL_LOG_ERROR,
                  "Failed to open rotated temp file: " + tempFile_.errorString() );
         return {};
