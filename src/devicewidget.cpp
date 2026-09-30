@@ -422,8 +422,6 @@ void DeviceWidget::stopAllCaptures()
     stopAll();
 
     hostNotify( "All logcat sessions stopped." );
-
-    updateDeviceCombo();
 }
 
 void DeviceWidget::browseSavePath()
