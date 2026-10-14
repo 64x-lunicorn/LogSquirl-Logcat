@@ -26,7 +26,7 @@ permissions: {}
 jobs:
   security:
     name: Security
-    uses: 64x-lunicorn/LogSquirl-Plugin-CI/.github/workflows/plugin-security.yml@1043d05e35fb3d854d97e5785869eaf12410a801 # v1.0.5
+    uses: 64x-lunicorn/LogSquirl-Plugin-CI/.github/workflows/plugin-security.yml@2570b74ec46f8be33720381c98aa568f4b962e04 # v1.2.0
     permissions:
       contents: read
       security-events: write # zizmor findings to code scanning
