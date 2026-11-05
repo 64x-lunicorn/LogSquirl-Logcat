@@ -27,6 +27,9 @@
 
 #include <catch2/catch.hpp>
 
+#include <cstring>
+#include <memory>
+
 #include "devicewidget.h"
 #include "fakeadb.h"
 #include "plugin.h"
@@ -47,6 +50,8 @@ using logcat_test::FakeHost;
 using logcat_test::waitFor;
 
 extern "C" int logsquirl_plugin_init( const LogSquirlHostApi* api, void* handle );
+extern "C" int logsquirl_plugin_init_ex( const LogSquirlHostApi* api, void* handle,
+                                         size_t api_size );
 extern "C" void logsquirl_plugin_shutdown( void );
 extern "C" void logsquirl_plugin_configure( void* parent_widget );
 
@@ -455,3 +460,60 @@ SCENARIO( "no exception leaves an entry point", "[plugin]" )
     }
 }
 #endif
+
+SCENARIO( "the plugin learns which functions the host has from the size of its table", "[plugin]" )
+{
+    GIVEN( "a host of LogSquirl 26.11 or later, which calls init_ex() with its table's size" )
+    {
+        FakeHost host;
+
+        WHEN( "the plugin is initialised" )
+        {
+            REQUIRE( logsquirl_plugin_init_ex( host.api(), &host, sizeof( LogSquirlHostApi ) )
+                     == 0 );
+
+            THEN( "it keeps the size, and every later function counts as there" )
+            {
+                REQUIRE( logcat::g_state.hostApiSize == sizeof( LogSquirlHostApi ) );
+                REQUIRE( LOGSQUIRL_HOST_API_HAS( logcat::g_state.hostApiSize, open_regex_lab ) );
+            }
+
+            AND_WHEN( "it is shut down" )
+            {
+                logsquirl_plugin_shutdown();
+
+                THEN( "the size is forgotten" )
+                {
+                    REQUIRE( logcat::g_state.hostApiSize == 0 );
+                }
+            }
+
+            logsquirl_plugin_shutdown();
+        }
+    }
+
+    GIVEN( "a host of LogSquirl 26.10, whose table ends before the later functions" )
+    {
+        FakeHost host;
+        // Exactly the base table in a block of its own: a read past it is a
+        // real out-of-bounds read, which an AddressSanitizer build reports.
+        const auto block = std::make_unique<unsigned char[]>( LOGSQUIRL_HOST_API_BASE_SIZE );
+        std::memcpy( block.get(), host.api(), LOGSQUIRL_HOST_API_BASE_SIZE );
+        const auto* baseTable = reinterpret_cast<const LogSquirlHostApi*>( block.get() );
+
+        WHEN( "it calls init()" )
+        {
+            REQUIRE( logsquirl_plugin_init( baseTable, &host ) == 0 );
+
+            THEN( "the plugin starts with the base table's size and no later function" )
+            {
+                REQUIRE( logcat::g_state.hostApiSize == LOGSQUIRL_HOST_API_BASE_SIZE );
+                REQUIRE_FALSE(
+                    LOGSQUIRL_HOST_API_HAS( logcat::g_state.hostApiSize, open_regex_lab ) );
+                REQUIRE( host.sidebarTabs.size() == 1 );
+            }
+
+            logsquirl_plugin_shutdown();
+        }
+    }
+}

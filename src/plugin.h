@@ -40,6 +40,8 @@
 
 #include <QString>
 
+#include <cstddef>
+
 namespace logcat {
 class DeviceWidget;
 class SidebarWidget;
@@ -60,7 +62,11 @@ struct PluginState {
     DeviceWidget* dialog = nullptr;         ///< Logcat session dialog.
     SidebarWidget* sidebarWidget = nullptr; ///< Sidebar panel for session control.
     bool sidebarTabRegistered = false;      ///< The host holds sidebarWidget as a tab.
-    bool initialised = false;               ///< True between init() and shutdown().
+    /// The size of the host's table (init_ex()): a function added after
+    /// LogSquirl 26.10 may be used only if LOGSQUIRL_HOST_API_HAS( hostApiSize,
+    /// member ) says the running host has it.  Never copy *api.
+    std::size_t hostApiSize = 0;
+    bool initialised = false; ///< True between init() and shutdown().
     bool quitting = false; ///< LogSquirl is quitting (aboutToQuit), not just unloading the plugin.
     QString tempRoot;      ///< Where temporary directories go; empty: the system's (for tests).
 };

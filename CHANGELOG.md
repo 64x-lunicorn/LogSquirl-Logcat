@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   import; on an older LogSquirl, import the two files from the release
   archive (#29).
 
+### Changed
+- **Built against the plugin API of LogSquirl 26.12.** LogSquirl 26.11 and
+  later start the plugin through `logsquirl_plugin_init_ex()` and tell it
+  which of their functions it may use; LogSquirl 26.10 starts it as before,
+  so the plugin still runs there.
+
 ### Fixed
 - **A log file that cannot be written stops the capture.** When the disk is
   full or the log directory's drive goes away, the session stops and says
@@ -28,8 +34,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   device or a symbolic link is refused at once, so it cannot freeze
   LogSquirl or write elsewhere (#34).
 - **A log file the plugin creates is readable by you only** (#38).
-
-### Fixed
 - **An error in the plugin no longer ends LogSquirl.** An exception in the
   plugin's start, shutdown, Configure or its menu entry is logged instead
   of escaping into LogSquirl; a start that fails is undone, the sidebar tab
