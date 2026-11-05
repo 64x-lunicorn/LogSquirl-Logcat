@@ -42,6 +42,7 @@
 #include <QThread>
 
 #include <functional>
+#include <stdexcept>
 
 namespace logcat_test {
 
@@ -65,7 +66,12 @@ public:
     {
         api_.api_version = LOGSQUIRL_PLUGIN_API_VERSION;
         api_.log_message = []( void* handle, int, const char* message ) {
-            self( handle )->logs << QString::fromUtf8( message );
+            auto* host = self( handle );
+            const auto text = QString::fromUtf8( message );
+            host->logs << text;
+            if ( !host->failLogContaining.isEmpty() && text.contains( host->failLogContaining ) ) {
+                throw std::runtime_error( "the log is full" );
+            }
         };
         api_.get_config_dir
             = []( void* handle ) { return self( handle )->configDirUtf8_.constData(); };
@@ -80,8 +86,15 @@ public:
             self( handle )->menuActions.append(
                 { QString::fromUtf8( label ), callback, userData } );
         };
-        api_.register_sidebar_tab = []( void*, const char*, void* ) {};
-        api_.unregister_sidebar_tab = []( void*, void* ) {};
+        api_.register_sidebar_tab = []( void* handle, const char*, void* widget ) {
+            auto* host = self( handle );
+            if ( host->failSidebarTab ) {
+                throw std::runtime_error( "no room for another tab" );
+            }
+            host->sidebarTabs << widget;
+        };
+        api_.unregister_sidebar_tab
+            = []( void* handle, void* widget ) { self( handle )->sidebarTabs.removeAll( widget ); };
 
         logcat::g_state.api = &api_;
         logcat::g_state.handle = this;
@@ -98,6 +111,12 @@ public:
     FakeHost( const FakeHost& ) = delete;
     FakeHost& operator=( const FakeHost& ) = delete;
 
+    /** The host API table, to pass to logsquirl_plugin_init(). */
+    const LogSquirlHostApi* api() const
+    {
+        return &api_;
+    }
+
     /** The plugin's config directory (empty until a test writes to it). */
     QString configDir() const
     {
@@ -112,6 +131,11 @@ public:
 
     QStringList logs;
     QStringList notifications;
+    QList<void*> sidebarTabs; ///< The widgets registered as sidebar tabs.
+    /// register_sidebar_tab() throws, as a host out of room might.
+    bool failSidebarTab = false;
+    /// log_message() throws after logging a message containing this.
+    QString failLogContaining;
     QStringList openedFiles;
     QList<MenuAction> menuActions;
 

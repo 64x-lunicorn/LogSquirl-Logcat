@@ -349,3 +349,109 @@ SCENARIO( "temporary directories of LogSquirl processes that ended are swept", "
     }
 #endif
 }
+
+SCENARIO( "the plugin registers its sidebar tab for its lifetime", "[plugin]" )
+{
+    GIVEN( "a host" )
+    {
+        FakeHost host;
+
+        WHEN( "the plugin is initialised" )
+        {
+            REQUIRE( logsquirl_plugin_init( host.api(), &host ) == 0 );
+
+            THEN( "its sidebar widget is registered as a tab" )
+            {
+                REQUIRE( host.sidebarTabs.size() == 1 );
+                REQUIRE( host.sidebarTabs.first() == logcat::g_state.sidebarWidget );
+            }
+
+            AND_WHEN( "it is shut down" )
+            {
+                logsquirl_plugin_shutdown();
+
+                THEN( "the tab is unregistered and the state cleared" )
+                {
+                    REQUIRE( host.sidebarTabs.isEmpty() );
+                    REQUIRE( logcat::g_state.sidebarWidget == nullptr );
+                    REQUIRE( logcat::g_state.dialog == nullptr );
+                    REQUIRE_FALSE( logcat::g_state.initialised );
+                }
+            }
+
+            logsquirl_plugin_shutdown();
+        }
+    }
+}
+
+// MSVC's default /EHsc assumes that functions of C linkage, like the host
+// API's, never throw, and may drop the handlers this test relies on.
+#ifndef _MSC_VER
+SCENARIO( "no exception leaves an entry point", "[plugin]" )
+{
+    GIVEN( "a host whose register_sidebar_tab() throws" )
+    {
+        FakeHost host;
+        host.failSidebarTab = true;
+
+        WHEN( "the plugin is initialised" )
+        {
+            int rc = 0;
+            REQUIRE_NOTHROW( rc = logsquirl_plugin_init( host.api(), &host ) );
+
+            THEN( "initialisation fails, is logged, and leaves nothing behind" )
+            {
+                REQUIRE( rc != 0 );
+                REQUIRE( logcat::g_state.sidebarWidget == nullptr );
+                REQUIRE( logcat::g_state.dialog == nullptr );
+                REQUIRE_FALSE( host.logs.filter( "no room for another tab" ).isEmpty() );
+            }
+        }
+
+        // The host would not call shutdown() after a failed init, but it must be harmless.
+        REQUIRE_NOTHROW( logsquirl_plugin_shutdown() );
+    }
+
+    GIVEN( "a host that fails after the sidebar tab was registered" )
+    {
+        FakeHost host;
+        host.failLogContaining = "ready";
+
+        WHEN( "the plugin is initialised" )
+        {
+            int rc = 0;
+            REQUIRE_NOTHROW( rc = logsquirl_plugin_init( host.api(), &host ) );
+
+            THEN( "initialisation fails and the tab is unregistered before its widget goes" )
+            {
+                REQUIRE( rc != 0 );
+                REQUIRE( host.sidebarTabs.isEmpty() );
+                REQUIRE( logcat::g_state.sidebarWidget == nullptr );
+                REQUIRE( logcat::g_state.dialog == nullptr );
+            }
+        }
+
+        REQUIRE_NOTHROW( logsquirl_plugin_shutdown() );
+    }
+
+    GIVEN( "an initialised plugin in a host whose log throws on shutdown" )
+    {
+        FakeHost host;
+        REQUIRE( logsquirl_plugin_init( host.api(), &host ) == 0 );
+        host.failLogContaining = "shutting down";
+
+        WHEN( "it is shut down" )
+        {
+            REQUIRE_NOTHROW( logsquirl_plugin_shutdown() );
+
+            THEN( "every other step still ran" )
+            {
+                REQUIRE( host.sidebarTabs.isEmpty() );
+                REQUIRE( logcat::g_state.sidebarWidget == nullptr );
+                REQUIRE( logcat::g_state.dialog == nullptr );
+                REQUIRE_FALSE( logcat::g_state.initialised );
+            }
+        }
+    }
+}
+#endif
