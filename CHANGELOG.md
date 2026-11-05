@@ -34,8 +34,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   device or a symbolic link is refused at once, so it cannot freeze
   LogSquirl or write elsewhere (#34).
 - **A log file the plugin creates is readable by you only** (#38).
-
-### Fixed
 - **An error in the plugin no longer ends LogSquirl.** An exception in the
   plugin's start, shutdown, Configure or its menu entry is logged instead
   of escaping into LogSquirl; a start that fails is undone, the sidebar tab
