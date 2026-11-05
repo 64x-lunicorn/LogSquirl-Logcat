@@ -255,7 +255,10 @@ void SidebarWidget::rebuildSessionList()
         rowLayout->setContentsMargins( 2, 2, 2, 2 );
         rowLayout->setSpacing( 4 );
 
+        // A device names itself: its serial is shown as it is, never
+        // rendered as rich text.
         auto* label = new QLabel( serial, row );
+        label->setTextFormat( Qt::PlainText );
         label->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Preferred );
         rowLayout->addWidget( label );
 

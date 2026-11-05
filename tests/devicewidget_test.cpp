@@ -31,11 +31,13 @@
 #include "devicewidget.h"
 #include "fakeadb.h"
 #include "readonlydir.h"
+#include "sidebarwidget.h"
 
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QLabel>
 #include <QProcess>
 #include <QPushButton>
 #include <QTemporaryDir>
@@ -126,6 +128,18 @@ private:
         = { "PATH", "ANDROID_HOME", "ANDROID_SDK_ROOT" };
     QList<QByteArray> saved_;
 };
+
+/** The label among @p widget's children that shows @p text, or nullptr. */
+QLabel* labelShowing( const QWidget& widget, const QString& text )
+{
+    const auto labels = widget.findChildren<QLabel*>();
+    for ( auto* label : labels ) {
+        if ( label->text() == text ) {
+            return label;
+        }
+    }
+    return nullptr;
+}
 
 } // namespace
 
@@ -566,6 +580,60 @@ SCENARIO( "devices are discovered in the background", "[devicewidget]" )
             {
                 REQUIRE( refresh->isEnabled() );
                 REQUIRE_FALSE( refresh->text().contains( "Scanning" ) );
+            }
+        }
+    }
+}
+#endif
+
+#ifdef Q_OS_UNIX
+SCENARIO( "a serial and an adb path are shown as plain text", "[devicewidget]" )
+{
+    // Any USB gadget can name itself; a label would render markup in its
+    // serial as rich text, and load what an <img> in it points to.
+    GIVEN( "a session for a device whose serial is markup" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        DeviceWidget widget;
+        const logcat::SidebarWidget sidebar( &widget );
+        const QString serial = "<b>emulator-5554</b>";
+        REQUIRE( Qt::mightBeRichText( serial ) );
+        REQUIRE( widget.startSession( serial ) );
+
+        THEN( "the sidebar's session list shows the serial as its literal text" )
+        {
+            QLabel* label = nullptr;
+            REQUIRE( waitFor( [ & ]() {
+                label = labelShowing( sidebar, serial );
+                return label != nullptr;
+            } ) );
+            REQUIRE( label->textFormat() == Qt::PlainText );
+        }
+
+        widget.stopAll();
+    }
+
+    GIVEN( "an adb path that is markup" )
+    {
+        FakeHost host;
+        const auto adb = host.configDir() + "/<b>adb";
+        {
+            QFile file( adb );
+            REQUIRE( file.open( QIODevice::WriteOnly ) );
+        }
+        logcat_test::useAdb( host, adb );
+        REQUIRE( Qt::mightBeRichText( adb.mid( adb.lastIndexOf( '/' ) + 1 ) ) );
+
+        WHEN( "the dialog shows it" )
+        {
+            const DeviceWidget widget;
+
+            THEN( "it is shown as its literal text" )
+            {
+                auto* label = labelShowing( widget, adb );
+                REQUIRE( label != nullptr );
+                REQUIRE( label->textFormat() == Qt::PlainText );
             }
         }
     }

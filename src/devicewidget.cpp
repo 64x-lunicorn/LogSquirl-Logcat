@@ -158,7 +158,9 @@ DeviceWidget::DeviceWidget( QWidget* parent )
     auto* adbGroup = new QGroupBox( "ADB", this );
     auto* adbLayout = new QHBoxLayout( adbGroup );
 
+    // A path from the configuration is shown as it is, never as rich text.
     adbPathLabel_ = new QLabel( this );
+    adbPathLabel_->setTextFormat( Qt::PlainText );
     adbPathLabel_->setTextInteractionFlags( Qt::TextSelectableByMouse );
     adbLayout->addWidget( adbPathLabel_, 1 );
 

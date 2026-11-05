@@ -40,6 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plugin's start, shutdown, Configure or its menu entry is logged instead
   of escaping into LogSquirl; a start that fails is undone, the sidebar tab
   unregistered before its widget goes.
+- **A device serial and the ADB path are shown as they are.** A device can
+  report any serial; one that looks like HTML is shown as its literal text
+  in the sidebar's session list, never rendered, and so is the ADB path in
+  the dialog (#35).
 
 ## [0.4.0] — 2026-09-30
 
