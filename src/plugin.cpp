@@ -32,11 +32,16 @@
  * PLUGIN LIFECYCLE
  * ────────────────
  *   1. Host calls get_info() to read metadata.
- *   2. Host calls init(api, handle) — we store the pointers, create
- *      a DeviceWidget, and register it via register_status_widget().
+ *   2. Host calls init(api, handle) — we store the pointers, add the
+ *      Plugins menu entry, create the DeviceWidget and a SidebarWidget over
+ *      it, and register the latter as a sidebar tab.
  *   3. User interacts with the widget (refresh, start, stop, …).
- *   4. Host calls shutdown() — we stop all logcat sessions, unregister
- *      + delete the widget, and clear state.
+ *   4. Host calls shutdown() — we unregister + delete the sidebar, stop all
+ *      logcat sessions, delete the DeviceWidget, and clear state.
+ *
+ * No exception may leave an entry point or a host callback: the host is C,
+ * and an exception escaping into it terminates LogSquirl.  Their work runs
+ * through guarded(), which logs the failure instead.
  *
  * @see logsquirl_plugin_api.h for the full host API reference.
  */
@@ -50,6 +55,8 @@
 
 #include <QApplication>
 #include <QWindow>
+
+#include <exception>
 
 // ── Global state ─────────────────────────────────────────────────────────
 
@@ -85,6 +92,36 @@ static const LogSquirlPluginInfo kPluginInfo = {
     /* api_version */ LOGSQUIRL_PLUGIN_API_VERSION,
 };
 
+// ── Internal helpers ─────────────────────────────────────────────────────
+
+/// Log that work for the host failed.
+static void logFailure( const char* what, const char* reason ) noexcept
+{
+    try {
+        logcat::hostLog( LOGSQUIRL_LOG_ERROR, QStringLiteral( "Logcat plugin: %1 failed: %2" )
+                                                  .arg( what, QString::fromUtf8( reason ) ) );
+    } catch ( ... ) {
+        // Nothing left to report it with.
+    }
+}
+
+/// Run work for the host, logging instead of throwing: the host is C, and
+/// an exception escaping into it would terminate LogSquirl.
+/// Returns false if it threw.
+template <typename Work>
+static bool guarded( const char* what, Work&& work ) noexcept
+{
+    try {
+        work();
+        return true;
+    } catch ( const std::exception& e ) {
+        logFailure( what, e.what() );
+    } catch ( ... ) {
+        logFailure( what, "unknown exception" );
+    }
+    return false;
+}
+
 // ── Menu action callback ─────────────────────────────────────────────────
 
 /**
@@ -93,29 +130,33 @@ static const LogSquirlPluginInfo kPluginInfo = {
  */
 static void showLogcatDialog( void* /* userData */ )
 {
-    if ( !logcat::g_state.dialog ) {
-        logcat::g_state.dialog = new logcat::DeviceWidget();
-    }
-    auto* dialog = logcat::g_state.dialog;
+    guarded( "showing the Android Logcat dialog", [] {
+        if ( !logcat::g_state.dialog ) {
+            logcat::g_state.dialog = new logcat::DeviceWidget();
+        }
+        auto* dialog = logcat::g_state.dialog;
 
-    // The dialog is created parentless in init() and deleted in shutdown(),
-    // so it must not become a child of a main window that may be destroyed
-    // first.  A transient parent keeps it on top of the window whose menu
-    // opened it, without handing over ownership.
-    auto* window = QApplication::activeWindow();
-    if ( window && window != dialog ) {
-        dialog->winId(); // creates the native window, and so windowHandle()
-        dialog->windowHandle()->setTransientParent( window->windowHandle() );
-    }
+        // The dialog is created parentless in init() and deleted in shutdown(),
+        // so it must not become a child of a main window that may be destroyed
+        // first.  A transient parent keeps it on top of the window whose menu
+        // opened it, without handing over ownership.
+        auto* window = QApplication::activeWindow();
+        if ( window && window != dialog ) {
+            dialog->winId(); // creates the native window, and so windowHandle()
+            dialog->windowHandle()->setTransientParent( window->windowHandle() );
+        }
 
-    dialog->show();
-    dialog->raise();
-    dialog->activateWindow();
+        dialog->show();
+        dialog->raise();
+        dialog->activateWindow();
+    } );
 }
 
 // ── Exported C entry points ──────────────────────────────────────────────
 
 extern "C" {
+
+LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void );
 
 /**
  * Return static plugin metadata.
@@ -137,7 +178,8 @@ LOGSQUIRL_PLUGIN_EXPORT const LogSquirlPluginInfo* logsquirl_plugin_get_info( vo
  * @return 0 on success, non-zero on failure.
  *
  * Stores the host API and handle, creates a DeviceWidget, and registers
- * it in the host's status bar area.
+ * a sidebar tab over it.  A failure is logged and undone (shutdown()), and
+ * init returns 1.
  */
 LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, void* handle )
 {
@@ -150,35 +192,45 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, 
     logcat::g_state.initialised = true;
     logcat::g_state.quitting = false;
 
-    api->log_message( handle, LOGSQUIRL_LOG_INFO, "Logcat plugin initialising…" );
+    const bool ok = guarded( "initialisation", [ api, handle ] {
+        api->log_message( handle, LOGSQUIRL_LOG_INFO, "Logcat plugin initialising…" );
 
-    // Files of LogSquirl processes that ended without removing them,
-    // e.g. after a crash: no tab can show them any more.
-    logcat::removeStaleTempDirs( logcat::tempRoot() );
+        // Files of LogSquirl processes that ended without removing them,
+        // e.g. after a crash: no tab can show them any more.
+        logcat::removeStaleTempDirs( logcat::tempRoot() );
 
-    // Add "Android Logcat" to the Plugins menu.  When clicked it opens a
-    // non-modal dialog for device selection and session management.
-    api->register_menu_action( handle, "Plugins", "Android Logcat\u2026", &showLogcatDialog,
-                               nullptr );
+        // Add "Android Logcat" to the Plugins menu.  When clicked it opens a
+        // non-modal dialog for device selection and session management.
+        api->register_menu_action( handle, "Plugins", "Android Logcat\u2026", &showLogcatDialog,
+                                   nullptr );
 
-    // Create the DeviceWidget early so the sidebar panel can reference it.
-    logcat::g_state.dialog = new logcat::DeviceWidget();
+        // Create the DeviceWidget early so the sidebar panel can reference it.
+        logcat::g_state.dialog = new logcat::DeviceWidget();
 
-    // The host shuts the plugin down both when LogSquirl quits (after
-    // aboutToQuit) and when the plugin is disabled or updated at runtime,
-    // with the tabs left open; only in the first case may the temporary
-    // files go.
-    if ( auto* app = QCoreApplication::instance() ) {
-        QObject::connect( app, &QCoreApplication::aboutToQuit, logcat::g_state.dialog,
-                          []() { logcat::g_state.quitting = true; } );
+        // The host shuts the plugin down both when LogSquirl quits (after
+        // aboutToQuit) and when the plugin is disabled or updated at runtime,
+        // with the tabs left open; only in the first case may the temporary
+        // files go.
+        if ( auto* app = QCoreApplication::instance() ) {
+            QObject::connect( app, &QCoreApplication::aboutToQuit, logcat::g_state.dialog,
+                              []() { logcat::g_state.quitting = true; } );
+        }
+
+        // Register a sidebar tab for logcat session management
+        logcat::g_state.sidebarWidget = new logcat::SidebarWidget( logcat::g_state.dialog );
+        api->register_sidebar_tab( handle, "Logcat",
+                                   static_cast<void*>( logcat::g_state.sidebarWidget ) );
+        logcat::g_state.sidebarTabRegistered = true;
+
+        api->log_message( handle, LOGSQUIRL_LOG_INFO, "Logcat plugin ready." );
+    } );
+
+    if ( !ok ) {
+        // Undo what was set up, in reverse: shutdown() unregisters the tab
+        // only if the host took it, then deletes the widgets.
+        logsquirl_plugin_shutdown();
+        return 1;
     }
-
-    // Register a sidebar tab for logcat session management
-    logcat::g_state.sidebarWidget = new logcat::SidebarWidget( logcat::g_state.dialog );
-    api->register_sidebar_tab( handle, "Logcat",
-                               static_cast<void*>( logcat::g_state.sidebarWidget ) );
-
-    api->log_message( handle, LOGSQUIRL_LOG_INFO, "Logcat plugin ready." );
     return 0;
 }
 
@@ -190,27 +242,39 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init( const LogSquirlHostApi* api, 
  */
 LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void )
 {
-    logcat::hostLog( LOGSQUIRL_LOG_INFO, "Logcat plugin shutting down…" );
+    auto& st = logcat::g_state;
+    // Each step on its own, so that one failing does not skip the others.
+    guarded( "shutdown",
+             [] { logcat::hostLog( LOGSQUIRL_LOG_INFO, "Logcat plugin shutting down…" ); } );
 
-    if ( logcat::g_state.sidebarWidget ) {
-        logcat::g_state.api->unregister_sidebar_tab(
-            logcat::g_state.handle, static_cast<void*>( logcat::g_state.sidebarWidget ) );
-        delete logcat::g_state.sidebarWidget;
-        logcat::g_state.sidebarWidget = nullptr;
+    // The host must let go of the tab before its widget is deleted.
+    if ( st.sidebarTabRegistered ) {
+        st.sidebarTabRegistered = false;
+        guarded( "unregistering the sidebar tab", [] {
+            auto& st = logcat::g_state;
+            if ( st.api && st.handle ) {
+                st.api->unregister_sidebar_tab( st.handle, static_cast<void*>( st.sidebarWidget ) );
+            }
+        } );
+    }
+    if ( st.sidebarWidget ) {
+        guarded( "shutdown", [] { delete logcat::g_state.sidebarWidget; } );
+        st.sidebarWidget = nullptr;
     }
 
-    if ( logcat::g_state.dialog ) {
-        logcat::g_state.dialog->stopAll();
-        delete logcat::g_state.dialog;
-        logcat::g_state.dialog = nullptr;
+    if ( st.dialog ) {
+        guarded( "stopping the logcat sessions", [] { logcat::g_state.dialog->stopAll(); } );
+        guarded( "shutdown", [] { delete logcat::g_state.dialog; } );
+        st.dialog = nullptr;
     }
 
     // The tabs close with LogSquirl: remove the files of every instance of
     // the plugin in this process, also those of instances before a runtime
     // disable or update, which only the directory names remember.  Save
     // paths and the log directory are never touched.
-    if ( logcat::g_state.quitting ) {
-        logcat::removeOwnTempDirs( logcat::tempRoot() );
+    if ( st.quitting ) {
+        guarded( "removing temporary files",
+                 [] { logcat::removeOwnTempDirs( logcat::tempRoot() ); } );
     }
 
     logcat::g_state.api = nullptr;
@@ -230,9 +294,11 @@ LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_configure( void* parent_widget )
 {
     // The same as the dialog's Configure button, so that a new path is
     // used for a device scan right away, in the dialog and the sidebar.
-    if ( logcat::g_state.dialog ) {
-        logcat::g_state.dialog->configureAdbPath( static_cast<QWidget*>( parent_widget ) );
-    }
+    guarded( "configuring", [ parent_widget ] {
+        if ( logcat::g_state.dialog ) {
+            logcat::g_state.dialog->configureAdbPath( static_cast<QWidget*>( parent_widget ) );
+        }
+    } );
 }
 
 } // extern "C"

@@ -1,0 +1,6 @@
+- Build and test: [Running Tests](README.md#running-tests); with Homebrew's Qt add `-DCMAKE_PREFIX_PATH=/opt/homebrew/opt/qt`, and run `QT_QPA_PLATFORM=offscreen ctest --output-on-failure`: from a terminal on macOS a window cannot take focus, and the window tests fail on a desktop platform.
+- Format: clang-format at the version pinned in `.github/requirements/clang-format.txt` (`pip install --require-hashes -r` it), as CI's Format job runs it on every C++ file.
+- Entry points and host callbacks run their work through `guarded()` (`src/plugin.cpp`): the host is C, and an exception escaping into it ends LogSquirl.
+- A user-visible change gets an entry under `## [Unreleased]` in `CHANGELOG.md`: a **bold headline**, then prose, ending with the ticket number `(#N)`.
+- The workflows, `.clang-format`, `docs/agents/issue-tracker.md` and `include/logsquirl_plugin_api.h` are LogSquirl-Plugin-CI's (`scripts/sync-plugin.sh`): change them there.
+- Issues and specs: [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md)
