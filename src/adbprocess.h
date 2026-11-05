@@ -49,6 +49,8 @@
 #include <QStringList>
 #include <QTemporaryDir>
 
+#include <limits>
+
 namespace logcat {
 
 /**
@@ -116,15 +118,19 @@ public:
     /**
      * Remove every complete line from the front of @p buffer and return
      * the lines, without their "\n" or "\r\n" terminator.  An incomplete
-     * last line stays in the buffer until more data arrives.
+     * last line stays in the buffer until more data arrives - unless it is
+     * longer than @p maxLineBytes: then it is taken in lines of
+     * @p maxLineBytes, so that the buffer never keeps more than that.
      *
      * Extracted as a static helper so unit tests can exercise the line
      * splitting without running a real ADB process.
      *
-     * @param buffer  Bytes read from adb so far; complete lines are removed.
+     * @param buffer        Bytes read from adb so far; complete lines are removed.
+     * @param maxLineBytes  Most bytes of an incomplete line left in @p buffer.
      * @return The complete lines, in order.
      */
-    static QList<QByteArray> takeLines( QByteArray& buffer );
+    static QList<QByteArray>
+    takeLines( QByteArray& buffer, qsizetype maxLineBytes = std::numeric_limits<qsizetype>::max() );
 
     /**
      * Return a path for a new log file in @p dir, named
@@ -159,6 +165,14 @@ public:
 
     /// How long start() waits for adb to launch before giving up.
     static constexpr int kStartTimeoutMs = 5000;
+
+    /// Most bytes of a line without a newline kept in memory: past it,
+    /// adb's output is written out as a line, its stderr cut off.
+    static constexpr qsizetype kMaxLineBytes = 1024 * 1024;
+
+    /// Most characters of adb's stderr that go into one log message or
+    /// error; a longer line is cut short with "…".
+    static constexpr qsizetype kMaxMessageChars = 500;
 
     // ── Instance methods ─────────────────────────────────────────────
 
@@ -302,7 +316,7 @@ private:
     /// without a name; empty while none is.
     QString logPath_;
     QByteArray readBuffer_;   ///< Accumulates partial lines from stdout.
-    QByteArray stderrBuffer_; ///< Accumulates partial lines from stderr.
+    QByteArray stderrBuffer_; ///< Accumulates partial lines from stderr, cut at kMaxLineBytes.
     QString lastStderrLine_;  ///< Last line adb wrote to stderr.
     qint64 lineCount_ = 0;
     int rotationCount_ = 0;       ///< Incremented on each rotateLog() call.

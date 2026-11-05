@@ -477,6 +477,76 @@ SCENARIO( "adb's stderr reaches the user", "[adbprocess]" )
 }
 #endif
 
+#ifdef Q_OS_UNIX
+SCENARIO( "adb output without a newline is capped in memory", "[adbprocess]" )
+{
+    // A script that writes @p bytes x's without a newline to @p stream.
+    const auto xs = []( qsizetype bytes, const char* stream ) {
+        return "head -c " + QByteArray::number( bytes ) + " /dev/zero | tr '\\0' x" + stream + "\n";
+    };
+
+    GIVEN( "an adb that writes one byte more than the cap without a newline, then waits" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host,
+                                     xs( AdbProcess::kMaxLineBytes + 1, "" ) + "exec sleep 30\n" );
+        AdbProcess proc( "emulator-5554" );
+
+        WHEN( "the session runs" )
+        {
+            REQUIRE( proc.start() );
+
+            THEN( "the cap's worth is written out as a line while adb still runs" )
+            {
+                const auto path = proc.tempFilePath();
+                REQUIRE( waitFor( [ &path ]() {
+                    return readFile( path ).size() == AdbProcess::kMaxLineBytes + 1;
+                } ) );
+                REQUIRE( readFile( path ) == QByteArray( AdbProcess::kMaxLineBytes, 'x' ) + '\n' );
+                REQUIRE( proc.isRunning() );
+                REQUIRE( proc.lineCount() == 1 );
+            }
+        }
+    }
+
+    GIVEN( "an adb that writes twice the cap to stderr without a newline, then fails" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host,
+                                     xs( 2 * AdbProcess::kMaxLineBytes, " >&2" ) + "exit 1\n" );
+        QStringList errors;
+        int finishedCount = 0;
+        AdbProcess proc( "emulator-5554" );
+        QObject::connect( &proc, &AdbProcess::errorOccurred,
+                          [ &errors ]( const QString& message ) { errors << message; } );
+        QObject::connect( &proc, &AdbProcess::finished,
+                          [ &finishedCount ]( int ) { ++finishedCount; } );
+
+        WHEN( "the session ends" )
+        {
+            REQUIRE( proc.start() );
+            REQUIRE( waitFor( [ &finishedCount ]() { return finishedCount == 1; } ) );
+
+            THEN( "the error shows the start of what adb said, cut short" )
+            {
+                REQUIRE( errors.size() == 1 );
+                REQUIRE( errors.first().contains( "xxxx…" ) );
+                REQUIRE( errors.first().size() < AdbProcess::kMaxMessageChars + 100 );
+            }
+
+            THEN( "the host log gets it cut short as well" )
+            {
+                const auto lines = host.logs.filter( "xxxx" );
+                REQUIRE_FALSE( lines.isEmpty() );
+                for ( const auto& line : lines ) {
+                    REQUIRE( line.size() < AdbProcess::kMaxMessageChars + 100 );
+                }
+            }
+        }
+    }
+}
+#endif
+
 SCENARIO( "a typed path is made absolute, and a relative one refused", "[adbprocess]" )
 {
     THEN( "~ is the home directory, and the path is cleaned" )

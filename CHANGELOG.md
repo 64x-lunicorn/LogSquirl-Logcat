@@ -44,6 +44,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   report any serial; one that looks like HTML is shown as its literal text
   in the sidebar's session list, never rendered, and so is the ADB path in
   the dialog (#35).
+- **adb output without line breaks no longer fills the memory.** When adb,
+  or another program set as the ADB path, writes on and on without ending
+  a line, every megabyte is written to the log file as a line of its own;
+  what it writes to its error output is cut short in LogSquirl's log and
+  in the error shown (#36).
 
 ## [0.4.0] — 2026-09-30
 

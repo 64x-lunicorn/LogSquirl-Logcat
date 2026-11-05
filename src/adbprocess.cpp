@@ -75,6 +75,20 @@ QString safeFileName( const QString& serial )
     return name;
 }
 
+/// @p text, cut short at AdbProcess::kMaxMessageChars characters.
+QString messageText( const QString& text )
+{
+    if ( text.size() <= AdbProcess::kMaxMessageChars ) {
+        return text;
+    }
+    auto length = AdbProcess::kMaxMessageChars;
+    // Never split a surrogate pair.
+    if ( text.at( length - 1 ).isHighSurrogate() ) {
+        --length;
+    }
+    return text.left( length ) + QStringLiteral( "…" );
+}
+
 } // namespace
 
 // ── Construction / destruction ──────────────────────────────────────────
@@ -207,7 +221,7 @@ QStringList AdbProcess::parseDeviceList( const QByteArray& output )
     return devices;
 }
 
-QList<QByteArray> AdbProcess::takeLines( QByteArray& buffer )
+QList<QByteArray> AdbProcess::takeLines( QByteArray& buffer, qsizetype maxLineBytes )
 {
     QList<QByteArray> lines;
     qsizetype start = 0;
@@ -219,6 +233,12 @@ QList<QByteArray> AdbProcess::takeLines( QByteArray& buffer )
         }
         lines.append( line );
         start = end + 1;
+    }
+    // Output that never ends a line (a misbehaving adb, or another program
+    // configured as adb) must not grow the buffer without limit.
+    while ( buffer.size() - start > maxLineBytes ) {
+        lines.append( buffer.mid( start, maxLineBytes ) );
+        start += maxLineBytes;
     }
     buffer.remove( 0, start );
     return lines;
@@ -584,7 +604,7 @@ void AdbProcess::onReadyRead()
 {
     readBuffer_.append( process_.readAllStandardOutput() );
 
-    const auto lines = takeLines( readBuffer_ );
+    const auto lines = takeLines( readBuffer_, kMaxLineBytes );
     for ( const auto& line : lines ) {
         if ( !writeLine( line ) ) {
             return;
@@ -600,11 +620,16 @@ void AdbProcess::onReadyReadStandardError()
     // unexpected exit in onFinished().
     stderrBuffer_.append( process_.readAllStandardError() );
     for ( const auto& line : takeLines( stderrBuffer_ ) ) {
-        const auto text = QString::fromUtf8( line ).trimmed();
+        const auto text = messageText( QString::fromUtf8( line ).trimmed() );
         if ( !text.isEmpty() ) {
             lastStderrLine_ = text;
             hostLog( LOGSQUIRL_LOG_WARNING, QString( "adb (%1): %2" ).arg( serial_, text ) );
         }
+    }
+    // Only the start of a line reaches a message: the rest of one that
+    // never ends is dropped rather than kept.
+    if ( stderrBuffer_.size() > kMaxLineBytes ) {
+        stderrBuffer_.truncate( kMaxLineBytes );
     }
 }
 
