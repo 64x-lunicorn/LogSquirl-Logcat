@@ -71,7 +71,7 @@ See [Build](#build), then:
 DEST="$HOME/Library/Application Support/logsquirl/plugins/io.github.logsquirl.logcat"
 mkdir -p "$DEST"
 cp build/liblogsquirl_logcat.dylib "$DEST/"
-cp plugin.json icon.png "$DEST/"
+cp plugin.json icon.png presets/logcat_filter.conf presets/logcat_highlighter.conf "$DEST/"
 ```
 
 Or `cmake --install build --prefix "$HOME/.local"`.
@@ -109,6 +109,34 @@ After installing, restart LogSquirl or re-scan via *Plugins → Manage Plugins�
 6. **Configure ADB path** — *Plugins → Manage Plugins…* → select plugin →
    Configure.  Enter the full path to the `adb` executable (or leave empty
    for auto-detection).
+
+### Filters and highlighters
+
+The plugin brings a filter group and a highlighter set for the logcat it
+writes (the *threadtime* format, also with a user column):
+
+- **Filter group *Logcat*** ([`logcat_filter.conf`](presets/logcat_filter.conf)):
+  *Crashes* (`FATAL EXCEPTION` and the `AndroidRuntime` stack trace, native
+  `Fatal signal` and tombstone lines, `beginning of crash`), *ANRs*
+  (`ANR in …`) and *Errors and worse* (every `E` and `F` line). They are
+  listed in the Filters tab of the Filters Panel.
+- **Highlighter set *Logcat levels***
+  ([`logcat_highlighter.conf`](presets/logcat_highlighter.conf)): fatal
+  lines white on dark red, errors on light red, warnings on amber. Switch
+  it on in the **Highlighters** menu.
+
+On LogSquirl 26.12 and later both are read from the plugin's directory
+while the plugin is enabled, named *Logcat (Android Logcat)* and *Logcat
+levels (Android Logcat)*: nothing to import. They are read-only; *Copy to
+my groups* makes a copy you can change. On an older LogSquirl, take the two
+files from the release archive, where they lie next to the library, or from
+the [`presets`](presets/) folder, and import each once: **Tools →
+Predefined filters…** and **Highlighters → Configure highlighters…**,
+*Import*, **OK**.
+
+LogSquirl already recognises the logcat format itself (its built-in
+`logcat_log` Log Format): Table View, levels and timestamps need no file
+from the plugin.
 
 ## Prerequisites
 
@@ -221,7 +249,7 @@ sequenceDiagram
 | **open_file() instead of push_line()** | Each device writes to its own temp file. The host opens each file with follow/tail mode → one tab per device. |
 | **register_sidebar_tab()** | Plugin registers a sidebar widget that is always visible while the plugin is loaded. The sidebar contains device selection, session controls, and active session list. |
 | **QProcess for ADB** | Cross-platform, integrates with Qt event loop, no need for threading. |
-| **No built-in filtering** | LogSquirl's regex search and highlighters are more powerful than any filter we could build. |
+| **No built-in filtering** | LogSquirl's regex search and highlighters are more powerful than any filter we could build. The plugin only ships ready-made groups for them (`presets/`, named in `plugin.json`). |
 | **Library name without extension** | `plugin.json` uses `"library": "logsquirl_logcat"` — QLibrary resolves the platform suffix automatically. |
 
 ## Project Structure
@@ -230,6 +258,7 @@ sequenceDiagram
 logsquirl-logcat/
 ├── CMakeLists.txt              # Standalone build — finds Qt6, builds shared lib
 ├── plugin.json                 # Plugin manifest (cross-platform)
+├── presets/                    # Filter group and highlighter set (plugin.json names them)
 ├── LICENSE                     # GPL-3.0-or-later
 ├── README.md                   # This file
 ├── CHANGELOG.md                # Release history
@@ -250,6 +279,7 @@ logsquirl-logcat/
 │   ├── tests_main.cpp          # QApplication + Catch2 runner
 │   ├── parsedevicelist_test.cpp
 │   ├── plugininfo_test.cpp
+│   ├── presets_test.cpp        # The shipped filter group and highlighter set
 │   └── adbprocess_test.cpp
 └── docs/
     └── DEVELOPER_GUIDE.md      # How to use this as a plugin template

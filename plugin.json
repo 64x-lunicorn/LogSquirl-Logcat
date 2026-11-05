@@ -8,5 +8,7 @@
     "description": "Stream Android logcat output from ADB devices into LogSquirl tabs",
     "author": "LogSquirl Contributors",
     "license": "GPL-3.0-or-later",
-    "icon": "icon.png"
+    "icon": "icon.png",
+    "predefined_filters": [ "logcat_filter.conf" ],
+    "highlighter_sets": [ "logcat_highlighter.conf" ]
 }

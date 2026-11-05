@@ -24,6 +24,7 @@ add_executable(logsquirl_logcat_tests
     devicewidget_test.cpp
     generatelogpath_test.cpp
     plugin_test.cpp
+    presets_test.cpp
 )
 
 set_target_properties(logsquirl_logcat_tests PROPERTIES
@@ -55,6 +56,12 @@ target_sources(logsquirl_logcat_tests
         "${CMAKE_SOURCE_DIR}/src/tempdirs.cpp"
         "${CMAKE_SOURCE_DIR}/src/devicewidget.cpp"
         "${CMAKE_SOURCE_DIR}/src/sidebarwidget.cpp"
+)
+
+# Where presets_test.cpp finds the files the plugin ships.
+target_compile_definitions(logsquirl_logcat_tests
+    PRIVATE
+        LOGCAT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 
 # ── Register with CTest ──────────────────────────────────────────────────
