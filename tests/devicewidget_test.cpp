@@ -43,6 +43,7 @@
 #include <QTemporaryDir>
 #include <QTimer>
 
+#include <algorithm>
 #include <array>
 
 using logcat::DeviceWidget;
@@ -462,6 +463,53 @@ SCENARIO( "stopAll keeps temporary log files for their tabs", "[devicewidget]" )
             {
                 REQUIRE( QFileInfo::exists( host.openedFiles.first() ) );
                 REQUIRE( QFileInfo::exists( host.openedFiles.last() ) );
+            }
+        }
+    }
+}
+#endif
+
+#ifdef Q_OS_UNIX
+SCENARIO( "stopping all sessions waits for them together", "[devicewidget]" )
+{
+    GIVEN( "several sessions whose adb ignores SIGTERM" )
+    {
+        FakeHost host;
+        // sleep inherits the ignored SIGTERM, so only kill ends it.
+        logcat_test::installFakeAdb( host, "trap '' TERM\nprintf 'first\\n'\nexec sleep 30\n" );
+        auto* widget = new DeviceWidget;
+        constexpr int kSessions = 6;
+        QStringList serials;
+        for ( int i = 0; i < kSessions; ++i ) {
+            serials << QString( "emulator-%1" ).arg( 5554 + 2 * i );
+            REQUIRE( widget->startSession( serials.last() ) );
+        }
+        // Each adb has set its trap once it has written its first line.
+        REQUIRE( waitFor( [ widget, &serials ]() {
+            return std::all_of( serials.cbegin(), serials.cend(), [ widget ]( const auto& serial ) {
+                return widget->sessionLineCount( serial ) > 0;
+            } );
+        } ) );
+
+        WHEN( "all of them are stopped and the widget deleted, as at shutdown" )
+        {
+            QElapsedTimer timer;
+            timer.start();
+            widget->stopAll();
+            delete widget;
+            const auto elapsedMs = timer.elapsed();
+
+            THEN( "they are waited for together, not one after the other" )
+            {
+                // One after the other, each would take a second before it
+                // is killed: six seconds in all.
+                REQUIRE( elapsedMs < 4000 );
+            }
+
+            THEN( "each of them ends when it is killed" )
+            {
+                REQUIRE( host.logs.filter( "did not exit" ).isEmpty() );
+                REQUIRE( host.logs.filter( "Stopped logcat" ).size() == kSessions );
             }
         }
     }

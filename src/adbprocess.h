@@ -193,9 +193,18 @@ public:
     /**
      * Stop the logcat process: SIGTERM on Unix, kill on Windows (where
      * adb, a console program, ignores terminate()).  Waits at most two
-     * seconds.  No-op if not running.
+     * seconds.  No-op if not running, or if a stop has given up on adb
+     * already.
      */
     void stop();
+
+    /**
+     * Stop the logcat processes of @p sessions together, as stop() does
+     * one: every adb is told to end before any is waited for, and all are
+     * waited for against one shared deadline, so that stopping many takes
+     * no longer than stopping one - at most two seconds.
+     */
+    static void stopAll( const QList<AdbProcess*>& sessions );
 
     /**
      * Prevent the temporary log file from being deleted when this
@@ -281,10 +290,15 @@ private Q_SLOTS:
 
 private:
     /**
-     * End adb: SIGTERM on Unix, kill on Windows, then kill after a second.
-     * Waits at most two seconds; the exit is not reported as an error.
+     * End the adb of every one of @p sessions: SIGTERM on Unix, kill on
+     * Windows, then kill those left after a second.  Waits at most two
+     * seconds for all of them together; the exits are not reported as
+     * errors.
      */
-    void endProcess();
+    static void endProcesses( const QList<AdbProcess*>& sessions );
+
+    /// How long endProcesses() waits after it signals the processes, each time.
+    static constexpr int kStopStepMs = 1000;
 
     /// Write @p line and a newline; false, after failWrite(), if the log
     /// file cannot be written.
@@ -309,7 +323,8 @@ private:
     QString serial_;
     QString savePath_;
 
-    QProcess process_;
+    /// adb.  A child of this object - unless it outlives it: see ~AdbProcess().
+    QProcess* process_;
     QTemporaryDir tempDir_;
     QFile tempFile_;
     /// The log file open in tempFile_, which an open by descriptor leaves

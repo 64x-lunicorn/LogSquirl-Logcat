@@ -48,12 +48,15 @@
 
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDeadlineTimer>
 #include <QDir>
 #include <QFileInfo>
 #include <QProcessEnvironment>
 #include <QRegularExpression>
 #include <QSettings>
 #include <QStandardPaths>
+
+#include <algorithm>
 
 #ifdef Q_OS_UNIX
 #include <cerrno>
@@ -97,15 +100,16 @@ AdbProcess::AdbProcess( const QString& serial, const QString& savePath, QObject*
     : QObject( parent )
     , serial_( serial )
     , savePath_( savePath )
+    , process_( new QProcess( this ) )
     , tempDir_( tempDirTemplate( tempRoot() ) )
 {
     // Connect QProcess signals to our slots
-    connect( &process_, &QProcess::readyReadStandardOutput, this, &AdbProcess::onReadyRead );
-    connect( &process_, &QProcess::readyReadStandardError, this,
+    connect( process_, &QProcess::readyReadStandardOutput, this, &AdbProcess::onReadyRead );
+    connect( process_, &QProcess::readyReadStandardError, this,
              &AdbProcess::onReadyReadStandardError );
-    connect( &process_, QOverload<int, QProcess::ExitStatus>::of( &QProcess::finished ), this,
+    connect( process_, QOverload<int, QProcess::ExitStatus>::of( &QProcess::finished ), this,
              &AdbProcess::onFinished );
-    connect( &process_, &QProcess::errorOccurred, this, &AdbProcess::onErrorOccurred );
+    connect( process_, &QProcess::errorOccurred, this, &AdbProcess::onErrorOccurred );
 }
 
 AdbProcess::~AdbProcess()
@@ -116,11 +120,20 @@ AdbProcess::~AdbProcess()
     blockSignals( true );
     stop();
 
-    // If stop() could not reap adb, ~QProcess kills it and waits once
-    // more, and would deliver its last output and finished() to this
-    // object's slots - after the members they use (declared after
-    // process_, so destroyed before it) are gone.
-    process_.disconnect( this );
+    // An adb that stop() could not reap would deliver its last output and
+    // finished() to this object's slots, after the members they use are
+    // gone.
+    process_->disconnect( this );
+
+    // ~QProcess would kill it and wait once more, for up to 30 s, on the
+    // UI thread.  It is left to end on its own instead and deleted when it
+    // does.  The connection names Qt's own signal and slot, so that no
+    // code of this library is called if it has been unloaded by then.
+    if ( process_->state() != QProcess::NotRunning ) {
+        process_->setParent( nullptr );
+        QObject::connect( process_, SIGNAL( finished( int, QProcess::ExitStatus ) ), process_,
+                          SLOT( deleteLater() ) );
+    }
 }
 
 // ── Static: ADB discovery ───────────────────────────────────────────────
@@ -337,9 +350,9 @@ bool AdbProcess::start()
     stderrBuffer_.clear();
     lastStderrLine_.clear();
 
-    process_.setProgram( adb );
-    process_.setArguments( { "-s", serial_, "logcat" } );
-    process_.start();
+    process_->setProgram( adb );
+    process_->setArguments( { "-s", serial_, "logcat" } );
+    process_->start();
 
     // Wait for the launch itself (not for any output) so that a failure is
     // reported to the caller here.  Otherwise QProcess reports it later,
@@ -348,10 +361,10 @@ bool AdbProcess::start()
     // emitted the reason - except for a timeout, which QProcess only sets
     // as error() without emitting errorOccurred().  The wait is short:
     // it blocks the GUI.
-    if ( !process_.waitForStarted( kStartTimeoutMs ) ) {
-        if ( process_.state() != QProcess::NotRunning ) {
+    if ( !process_->waitForStarted( kStartTimeoutMs ) ) {
+        if ( process_->state() != QProcess::NotRunning ) {
             onErrorOccurred( QProcess::Timedout );
-            endProcess();
+            endProcesses( { this } );
         }
         discardLogFile();
         return false;
@@ -364,39 +377,82 @@ bool AdbProcess::start()
 
 void AdbProcess::stop()
 {
-    if ( !isRunning() ) {
+    stopAll( { this } );
+}
+
+void AdbProcess::stopAll( const QList<AdbProcess*>& sessions )
+{
+    // A session that a stop has given up on is not waited for again.
+    QList<AdbProcess*> ending;
+    for ( auto* session : sessions ) {
+        if ( session && session->isRunning() && !session->stopping_ ) {
+            ending.append( session );
+        }
+    }
+    if ( ending.isEmpty() ) {
         return;
     }
 
-    endProcess();
-    tempFile_.close();
+    endProcesses( ending );
 
-    hostLog( LOGSQUIRL_LOG_INFO, QString( "Stopped logcat for device %1 (%2 lines captured)" )
-                                     .arg( serial_ )
-                                     .arg( lineCount_ ) );
+    for ( auto* session : ending ) {
+        session->tempFile_.close();
+        hostLog( LOGSQUIRL_LOG_INFO, QString( "Stopped logcat for device %1 (%2 lines captured)" )
+                                         .arg( session->serial_ )
+                                         .arg( session->lineCount_ ) );
+    }
 }
 
-void AdbProcess::endProcess()
+void AdbProcess::endProcesses( const QList<AdbProcess*>& sessions )
 {
+    // Wait for every session's adb to exit, against one deadline for all:
+    // one that has exited while another was waited for is then only
+    // collected.
+    const auto waitForExit = [ &sessions ]() {
+        const QDeadlineTimer deadline( kStopStepMs );
+        for ( auto* session : sessions ) {
+            if ( session->isRunning() ) {
+                session->process_->waitForFinished(
+                    static_cast<int>( std::max<qint64>( 0, deadline.remainingTime() ) ) );
+            }
+        }
+    };
+
     // adb exits from the signal, which QProcess reports as a crash.  That
-    // is expected here and must not reach the user as an error.
-    stopping_ = true;
+    // is expected here and must not reach the user as an error.  Every
+    // session is told to end before any is waited for.
+    for ( auto* session : sessions ) {
+        session->stopping_ = true;
 #ifdef Q_OS_WIN
-    // terminate() only posts WM_CLOSE, which a console program like adb
-    // never receives; waiting for it would just block the GUI.
-    process_.kill();
+        // terminate() only posts WM_CLOSE, which a console program like
+        // adb never receives; waiting for it would just block the GUI.
+        session->process_->kill();
 #else
-    process_.terminate();
+        session->process_->terminate();
 #endif
-    if ( !process_.waitForFinished( 1000 ) ) {
-        process_.kill();
-        if ( !process_.waitForFinished( 1000 ) ) {
+    }
+    waitForExit();
+
+    bool killed = false;
+    for ( auto* session : sessions ) {
+        if ( session->isRunning() ) {
+            session->process_->kill();
+            killed = true;
+        }
+    }
+    if ( killed ) {
+        waitForExit();
+    }
+
+    for ( auto* session : sessions ) {
+        if ( session->isRunning() ) {
             hostLog( LOGSQUIRL_LOG_WARNING,
-                     QString( "adb for %1 did not exit when stopped." ).arg( serial_ ) );
+                     QString( "adb for %1 did not exit when stopped." ).arg( session->serial_ ) );
         }
     }
     // onFinished() clears stopping_.  If adb has not exited yet, it stays
-    // set, so that the exit, when it comes, is not reported as a crash.
+    // set, so that the exit, when it comes, is not reported as a crash,
+    // and a later stop does not wait for it again.
 }
 
 QString AdbProcess::preserveTempFile()
@@ -469,7 +525,7 @@ QString AdbProcess::rotateLog()
 
 bool AdbProcess::isRunning() const
 {
-    return process_.state() != QProcess::NotRunning;
+    return process_->state() != QProcess::NotRunning;
 }
 
 QString AdbProcess::tempFilePath() const
@@ -602,7 +658,7 @@ void AdbProcess::flushPartialLine()
 
 void AdbProcess::onReadyRead()
 {
-    readBuffer_.append( process_.readAllStandardOutput() );
+    readBuffer_.append( process_->readAllStandardOutput() );
 
     const auto lines = takeLines( readBuffer_, kMaxLineBytes );
     for ( const auto& line : lines ) {
@@ -618,7 +674,7 @@ void AdbProcess::onReadyReadStandardError()
     // adb reports problems (device offline, unauthorised, server restarts)
     // on stderr.  Pass them on to the host log; the last one explains an
     // unexpected exit in onFinished().
-    stderrBuffer_.append( process_.readAllStandardError() );
+    stderrBuffer_.append( process_->readAllStandardError() );
     for ( const auto& line : takeLines( stderrBuffer_ ) ) {
         const auto text = messageText( QString::fromUtf8( line ).trimmed() );
         if ( !text.isEmpty() ) {

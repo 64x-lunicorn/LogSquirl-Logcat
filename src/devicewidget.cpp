@@ -235,10 +235,15 @@ DeviceWidget::~DeviceWidget()
 
 void DeviceWidget::stopAll()
 {
+    // Stopped together: one after the other, adbs that do not exit would
+    // block the UI for two seconds each.
+    QList<AdbProcess*> stopped;
     const auto serials = sessions_.keys();
     for ( const auto& serial : serials ) {
-        auto* proc = takeSession( serial );
-        proc->stop();
+        stopped.append( takeSession( serial ) );
+    }
+    AdbProcess::stopAll( stopped );
+    for ( auto* proc : stopped ) {
         proc->preserveTempFile();
         proc->deleteLater();
     }

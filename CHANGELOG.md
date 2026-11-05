@@ -49,6 +49,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a line, every megabyte is written to the log file as a line of its own;
   what it writes to its error output is cut short in LogSquirl's log and
   in the error shown (#36).
+- **Stopping all sessions takes two seconds at most.** Stop All, quitting
+  LogSquirl and disabling the plugin end every adb at once and wait for
+  them together, instead of up to two seconds for each device in turn; an
+  adb that does not exit even when killed is left behind rather than
+  waited for once more (#37).
 
 ## [0.4.0] — 2026-09-30
 
