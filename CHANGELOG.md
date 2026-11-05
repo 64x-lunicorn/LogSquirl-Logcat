@@ -23,6 +23,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so the plugin still runs there.
 
 ### Fixed
+- **A log file that cannot be written stops the capture.** When the disk is
+  full or the log directory's drive goes away, the session stops and says
+  which file could not be written, instead of capturing on while every line
+  is lost (#32).
+- **A log file or directory is a full path.** `~` is the home directory; a
+  relative path is refused with a message instead of being created in
+  LogSquirl's working directory (#33).
+- **Only a regular file is written to.** A save path that is a FIFO, a
+  device or a symbolic link is refused at once, so it cannot freeze
+  LogSquirl or write elsewhere (#34).
+- **A log file the plugin creates is readable by you only** (#38).
+
+### Fixed
 - **An error in the plugin no longer ends LogSquirl.** An exception in the
   plugin's start, shutdown, Configure or its menu entry is logged instead
   of escaping into LogSquirl; a start that fails is undone, the sidebar tab
