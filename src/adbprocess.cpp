@@ -161,20 +161,24 @@ QString AdbProcess::findAdb()
 
     const auto env = QProcessEnvironment::systemEnvironment();
 
+    // The SDK's adb, as an executable is named on this platform: adb.exe
+    // on Windows.
+    const auto sdkAdb = []( const QString& sdk ) {
+        return sdk.isEmpty() ? QString()
+                             : QStandardPaths::findExecutable(
+                                   "adb", { QDir( sdk ).filePath( "platform-tools" ) } );
+    };
+
     // 2. Check ANDROID_HOME/platform-tools/adb
     const auto androidHome = env.value( "ANDROID_HOME" );
-    if ( !androidHome.isEmpty() ) {
-        const auto candidate = QDir( androidHome ).filePath( "platform-tools/adb" );
-        if ( QFileInfo::exists( candidate ) ) {
-            return candidate;
-        }
+    if ( const auto candidate = sdkAdb( androidHome ); !candidate.isEmpty() ) {
+        return candidate;
     }
 
     // 3. Check ANDROID_SDK_ROOT/platform-tools/adb (legacy)
     const auto sdkRoot = env.value( "ANDROID_SDK_ROOT" );
-    if ( !sdkRoot.isEmpty() && sdkRoot != androidHome ) {
-        const auto candidate = QDir( sdkRoot ).filePath( "platform-tools/adb" );
-        if ( QFileInfo::exists( candidate ) ) {
+    if ( sdkRoot != androidHome ) {
+        if ( const auto candidate = sdkAdb( sdkRoot ); !candidate.isEmpty() ) {
             return candidate;
         }
     }

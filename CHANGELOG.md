@@ -54,6 +54,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them together, instead of up to two seconds for each device in turn; an
   adb that does not exit even when killed is left behind rather than
   waited for once more (#37).
+- **The Android SDK's adb is found on Windows.** The `adb.exe` in
+  `platform-tools` of `ANDROID_HOME` or `ANDROID_SDK_ROOT` is used again,
+  rather than whichever adb comes first in the PATH, which may be another
+  or an older one (#39).
 
 ## [0.4.0] — 2026-09-30
 

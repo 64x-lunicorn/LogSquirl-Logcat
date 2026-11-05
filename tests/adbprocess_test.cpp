@@ -68,6 +68,58 @@ void touch( const QString& path )
     REQUIRE( file.open( QIODevice::WriteOnly ) );
 }
 #endif
+
+/** Sets an environment variable for its lifetime, then restores it. */
+class ScopedEnv {
+public:
+    ScopedEnv( const char* name, const QByteArray& value )
+        : name_( name )
+        , saved_( qgetenv( name ) )
+    {
+        qputenv( name, value );
+    }
+
+    ~ScopedEnv()
+    {
+        if ( saved_.isNull() ) {
+            qunsetenv( name_ );
+        }
+        else {
+            qputenv( name_, saved_ );
+        }
+    }
+
+    ScopedEnv( const ScopedEnv& ) = delete;
+    ScopedEnv& operator=( const ScopedEnv& ) = delete;
+
+private:
+    const char* name_;
+    QByteArray saved_;
+};
+
+/**
+ * Create an Android SDK in @p sdk with an adb in platform-tools, named as
+ * the SDK names it on this platform, and return its path.
+ */
+QString installSdkAdb( const QString& sdk )
+{
+#ifdef Q_OS_WIN
+    const auto path = sdk + "/platform-tools/adb.exe";
+#else
+    const auto path = sdk + "/platform-tools/adb";
+#endif
+    REQUIRE( QDir().mkpath( sdk + "/platform-tools" ) );
+    QFile file( path );
+    REQUIRE( file.open( QIODevice::WriteOnly ) );
+    file.write( "#!/bin/sh\n" );
+    file.setPermissions( file.permissions() | QFileDevice::ExeOwner );
+    return path;
+}
+
+bool isSameFile( const QString& a, const QString& b )
+{
+    return !a.isEmpty() && QFileInfo( a ).canonicalFilePath() == QFileInfo( b ).canonicalFilePath();
+}
 } // namespace
 
 SCENARIO( "AdbProcess construction and properties", "[adbprocess]" )
@@ -129,6 +181,39 @@ SCENARIO( "findAdb returns a path or empty string", "[adbprocess]" )
                 }
                 // If ADB is not installed, empty is the correct result — no assertion needed.
                 SUCCEED();
+            }
+        }
+    }
+}
+
+SCENARIO( "findAdb finds the adb of the Android SDK", "[adbprocess]" )
+{
+    GIVEN( "an SDK with adb in platform-tools, and no override" )
+    {
+        FakeHost host;
+        QTemporaryDir sdk;
+        QTemporaryDir emptySdk;
+        const auto adb = installSdkAdb( sdk.path() );
+
+        WHEN( "ANDROID_HOME names the SDK" )
+        {
+            const ScopedEnv home( "ANDROID_HOME", QFile::encodeName( sdk.path() ) );
+            const ScopedEnv root( "ANDROID_SDK_ROOT", QFile::encodeName( emptySdk.path() ) );
+
+            THEN( "its adb is found" )
+            {
+                REQUIRE( isSameFile( AdbProcess::findAdb(), adb ) );
+            }
+        }
+
+        WHEN( "ANDROID_SDK_ROOT names the SDK, and ANDROID_HOME one without adb" )
+        {
+            const ScopedEnv home( "ANDROID_HOME", QFile::encodeName( emptySdk.path() ) );
+            const ScopedEnv root( "ANDROID_SDK_ROOT", QFile::encodeName( sdk.path() ) );
+
+            THEN( "its adb is found" )
+            {
+                REQUIRE( isSameFile( AdbProcess::findAdb(), adb ) );
             }
         }
     }
