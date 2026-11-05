@@ -136,4 +136,52 @@ SCENARIO( "takeLines splits complete lines off the read buffer", "[takelines]" )
             }
         }
     }
+
+    GIVEN( "a partial line as long as the cap" )
+    {
+        QByteArray buffer = "abcd";
+
+        WHEN( "taking lines with a cap of 4 bytes" )
+        {
+            const auto lines = AdbProcess::takeLines( buffer, 4 );
+
+            THEN( "it still waits for its newline" )
+            {
+                REQUIRE( lines.isEmpty() );
+                REQUIRE( buffer == "abcd" );
+            }
+        }
+    }
+
+    GIVEN( "a partial line past the cap" )
+    {
+        QByteArray buffer = "one\nabcdefghij";
+
+        WHEN( "taking lines with a cap of 4 bytes" )
+        {
+            const auto lines = AdbProcess::takeLines( buffer, 4 );
+
+            THEN( "it is taken in lines of the cap, and at most the cap is kept" )
+            {
+                REQUIRE( lines == Lines{ "one", "abcd", "efgh" } );
+                REQUIRE( buffer == "ij" );
+            }
+        }
+    }
+
+    GIVEN( "a complete line past the cap" )
+    {
+        QByteArray buffer = "abcdefghij\n";
+
+        WHEN( "taking lines with a cap of 4 bytes" )
+        {
+            const auto lines = AdbProcess::takeLines( buffer, 4 );
+
+            THEN( "it is taken whole: it is not kept in memory" )
+            {
+                REQUIRE( lines == Lines{ "abcdefghij" } );
+                REQUIRE( buffer.isEmpty() );
+            }
+        }
+    }
 }

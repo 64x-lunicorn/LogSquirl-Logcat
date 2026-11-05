@@ -158,7 +158,9 @@ DeviceWidget::DeviceWidget( QWidget* parent )
     auto* adbGroup = new QGroupBox( "ADB", this );
     auto* adbLayout = new QHBoxLayout( adbGroup );
 
+    // A path from the configuration is shown as it is, never as rich text.
     adbPathLabel_ = new QLabel( this );
+    adbPathLabel_->setTextFormat( Qt::PlainText );
     adbPathLabel_->setTextInteractionFlags( Qt::TextSelectableByMouse );
     adbLayout->addWidget( adbPathLabel_, 1 );
 
@@ -233,10 +235,15 @@ DeviceWidget::~DeviceWidget()
 
 void DeviceWidget::stopAll()
 {
+    // Stopped together: one after the other, adbs that do not exit would
+    // block the UI for two seconds each.
+    QList<AdbProcess*> stopped;
     const auto serials = sessions_.keys();
     for ( const auto& serial : serials ) {
-        auto* proc = takeSession( serial );
-        proc->stop();
+        stopped.append( takeSession( serial ) );
+    }
+    AdbProcess::stopAll( stopped );
+    for ( auto* proc : stopped ) {
         proc->preserveTempFile();
         proc->deleteLater();
     }
@@ -564,6 +571,10 @@ void DeviceWidget::updateUiState()
 void DeviceWidget::configureAdbPath( QWidget* parent )
 {
     const auto configDir = AdbProcess::configDir();
+    if ( configDir.isEmpty() ) {
+        hostLog( LOGSQUIRL_LOG_WARNING, "The ADB path cannot be configured: no config directory." );
+        return;
+    }
     QSettings settings( configDir + "/logcat.ini", QSettings::IniFormat );
     const auto currentPath = settings.value( "adb/path", "" ).toString();
     const auto detected = AdbProcess::findAdb();
@@ -602,8 +613,14 @@ AdbProcess* DeviceWidget::takeSession( const QString& serial )
 
 bool DeviceWidget::isFileInUse( const QString& path ) const
 {
+    // The file a session writes to, as start() expands a path with ~.  A
+    // relative path, which start() refuses, is no session's file.
+    const auto file = AdbProcess::absoluteUserPath( path );
+    if ( file.isEmpty() ) {
+        return false;
+    }
     for ( const auto* proc : sessions_ ) {
-        if ( isSameFile( proc->tempFilePath(), path ) ) {
+        if ( isSameFile( proc->tempFilePath(), file ) ) {
             return true;
         }
     }

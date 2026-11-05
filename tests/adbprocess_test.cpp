@@ -33,11 +33,13 @@
 #include "fakeadb.h"
 #include "plugin.h"
 #include "readonlydir.h"
+#include "scopedenv.h"
 
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QSettings>
 #include <QTemporaryDir>
 
 #ifdef Q_OS_UNIX
@@ -51,6 +53,7 @@
 using logcat::AdbProcess;
 using logcat_test::FakeHost;
 using logcat_test::ReadOnlyDir;
+using logcat_test::ScopedEnv;
 using logcat_test::waitFor;
 
 namespace {
@@ -68,6 +71,30 @@ void touch( const QString& path )
     REQUIRE( file.open( QIODevice::WriteOnly ) );
 }
 #endif
+
+/**
+ * Create an Android SDK in @p sdk with an adb in platform-tools, named as
+ * the SDK names it on this platform, and return its path.
+ */
+QString installSdkAdb( const QString& sdk )
+{
+#ifdef Q_OS_WIN
+    const auto path = sdk + "/platform-tools/adb.exe";
+#else
+    const auto path = sdk + "/platform-tools/adb";
+#endif
+    REQUIRE( QDir().mkpath( sdk + "/platform-tools" ) );
+    QFile file( path );
+    REQUIRE( file.open( QIODevice::WriteOnly ) );
+    file.write( "#!/bin/sh\n" );
+    file.setPermissions( file.permissions() | QFileDevice::ExeOwner );
+    return path;
+}
+
+bool isSameFile( const QString& a, const QString& b )
+{
+    return !a.isEmpty() && QFileInfo( a ).canonicalFilePath() == QFileInfo( b ).canonicalFilePath();
+}
 } // namespace
 
 SCENARIO( "AdbProcess construction and properties", "[adbprocess]" )
@@ -93,23 +120,39 @@ SCENARIO( "AdbProcess construction and properties", "[adbprocess]" )
     }
 }
 
-SCENARIO( "configDir falls back to temp when plugin is not initialised", "[adbprocess]" )
+SCENARIO( "no adb override is read while the plugin is not initialised", "[adbprocess]" )
 {
-    GIVEN( "the plugin is not initialised (g_state.api is null)" )
+    GIVEN( "the plugin is not initialised, and a logcat.ini in the temporary directory" )
     {
         // Ensure clean state — no host API available.
         logcat::g_state.api = nullptr;
         logcat::g_state.handle = nullptr;
         logcat::g_state.initialised = false;
 
-        WHEN( "calling configDir()" )
+        // A temporary directory that every local user can write to, such
+        // as /tmp, with an override another user planted.
+        QTemporaryDir sharedTemp;
+        const ScopedEnv tmpdir( "TMPDIR", QFile::encodeName( sharedTemp.path() ) );
+        const ScopedEnv tmp( "TMP", QFile::encodeName( sharedTemp.path() ) );
+        const ScopedEnv temp( "TEMP", QFile::encodeName( sharedTemp.path() ) );
+        const auto planted = sharedTemp.filePath( "planted-adb" );
         {
-            const auto dir = AdbProcess::configDir();
+            QFile file( planted );
+            REQUIRE( file.open( QIODevice::WriteOnly ) );
+        }
+        {
+            QSettings settings( sharedTemp.filePath( "logcat.ini" ), QSettings::IniFormat );
+            settings.setValue( "adb/path", planted );
+        }
 
-            THEN( "a non-empty temporary path is returned" )
-            {
-                REQUIRE_FALSE( dir.isEmpty() );
-            }
+        THEN( "configDir() is empty" )
+        {
+            REQUIRE( AdbProcess::configDir().isEmpty() );
+        }
+
+        THEN( "findAdb() does not use the planted override" )
+        {
+            REQUIRE_FALSE( isSameFile( AdbProcess::findAdb(), planted ) );
         }
     }
 }
@@ -129,6 +172,39 @@ SCENARIO( "findAdb returns a path or empty string", "[adbprocess]" )
                 }
                 // If ADB is not installed, empty is the correct result — no assertion needed.
                 SUCCEED();
+            }
+        }
+    }
+}
+
+SCENARIO( "findAdb finds the adb of the Android SDK", "[adbprocess]" )
+{
+    GIVEN( "an SDK with adb in platform-tools, and no override" )
+    {
+        FakeHost host;
+        QTemporaryDir sdk;
+        QTemporaryDir emptySdk;
+        const auto adb = installSdkAdb( sdk.path() );
+
+        WHEN( "ANDROID_HOME names the SDK" )
+        {
+            const ScopedEnv home( "ANDROID_HOME", QFile::encodeName( sdk.path() ) );
+            const ScopedEnv root( "ANDROID_SDK_ROOT", QFile::encodeName( emptySdk.path() ) );
+
+            THEN( "its adb is found" )
+            {
+                REQUIRE( isSameFile( AdbProcess::findAdb(), adb ) );
+            }
+        }
+
+        WHEN( "ANDROID_SDK_ROOT names the SDK, and ANDROID_HOME one without adb" )
+        {
+            const ScopedEnv home( "ANDROID_HOME", QFile::encodeName( emptySdk.path() ) );
+            const ScopedEnv root( "ANDROID_SDK_ROOT", QFile::encodeName( sdk.path() ) );
+
+            THEN( "its adb is found" )
+            {
+                REQUIRE( isSameFile( AdbProcess::findAdb(), adb ) );
             }
         }
     }
@@ -296,6 +372,32 @@ SCENARIO( "rotateLog moves the capture to a new file", "[adbprocess]" )
                 REQUIRE( readFile( savePath ) == "first\nsecond\n" );
             }
         }
+    }
+
+    GIVEN( "a running session writing to a save path in the home directory, given with ~" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        QTemporaryDir home;
+        const ScopedEnv homeEnv( "HOME", QFile::encodeName( home.path() ) );
+
+        AdbProcess proc( "emulator-5554", "~/capture.log" );
+        REQUIRE( proc.start() );
+        REQUIRE( waitFor( [ &proc ]() { return proc.lineCount() == 2; } ) );
+
+        WHEN( "rotating" )
+        {
+            const auto newPath = proc.rotateLog();
+
+            THEN( "the capture continues in a new file in the home directory" )
+            {
+                REQUIRE_FALSE( newPath.isEmpty() );
+                REQUIRE( QFileInfo( newPath ).absolutePath() == QDir::cleanPath( home.path() ) );
+                REQUIRE( QFileInfo::exists( newPath ) );
+            }
+        }
+
+        proc.stop();
     }
 
     GIVEN( "a running session writing to a temporary file" )
@@ -471,6 +573,76 @@ SCENARIO( "adb's stderr reaches the user", "[adbprocess]" )
             {
                 REQUIRE( errors.size() == 1 );
                 REQUIRE( errors.first().contains( "device 'emulator-5554' not found" ) );
+            }
+        }
+    }
+}
+#endif
+
+#ifdef Q_OS_UNIX
+SCENARIO( "adb output without a newline is capped in memory", "[adbprocess]" )
+{
+    // A script that writes @p bytes x's without a newline to @p stream.
+    const auto xs = []( qsizetype bytes, const char* stream ) {
+        return "head -c " + QByteArray::number( bytes ) + " /dev/zero | tr '\\0' x" + stream + "\n";
+    };
+
+    GIVEN( "an adb that writes one byte more than the cap without a newline, then waits" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host,
+                                     xs( AdbProcess::kMaxLineBytes + 1, "" ) + "exec sleep 30\n" );
+        AdbProcess proc( "emulator-5554" );
+
+        WHEN( "the session runs" )
+        {
+            REQUIRE( proc.start() );
+
+            THEN( "the cap's worth is written out as a line while adb still runs" )
+            {
+                const auto path = proc.tempFilePath();
+                REQUIRE( waitFor( [ &path ]() {
+                    return readFile( path ).size() == AdbProcess::kMaxLineBytes + 1;
+                } ) );
+                REQUIRE( readFile( path ) == QByteArray( AdbProcess::kMaxLineBytes, 'x' ) + '\n' );
+                REQUIRE( proc.isRunning() );
+                REQUIRE( proc.lineCount() == 1 );
+            }
+        }
+    }
+
+    GIVEN( "an adb that writes twice the cap to stderr without a newline, then fails" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host,
+                                     xs( 2 * AdbProcess::kMaxLineBytes, " >&2" ) + "exit 1\n" );
+        QStringList errors;
+        int finishedCount = 0;
+        AdbProcess proc( "emulator-5554" );
+        QObject::connect( &proc, &AdbProcess::errorOccurred,
+                          [ &errors ]( const QString& message ) { errors << message; } );
+        QObject::connect( &proc, &AdbProcess::finished,
+                          [ &finishedCount ]( int ) { ++finishedCount; } );
+
+        WHEN( "the session ends" )
+        {
+            REQUIRE( proc.start() );
+            REQUIRE( waitFor( [ &finishedCount ]() { return finishedCount == 1; } ) );
+
+            THEN( "the error shows the start of what adb said, cut short" )
+            {
+                REQUIRE( errors.size() == 1 );
+                REQUIRE( errors.first().contains( "xxxx…" ) );
+                REQUIRE( errors.first().size() < AdbProcess::kMaxMessageChars + 100 );
+            }
+
+            THEN( "the host log gets it cut short as well" )
+            {
+                const auto lines = host.logs.filter( "xxxx" );
+                REQUIRE_FALSE( lines.isEmpty() );
+                for ( const auto& line : lines ) {
+                    REQUIRE( line.size() < AdbProcess::kMaxMessageChars + 100 );
+                }
             }
         }
     }

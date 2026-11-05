@@ -31,16 +31,20 @@
 #include "devicewidget.h"
 #include "fakeadb.h"
 #include "readonlydir.h"
+#include "scopedenv.h"
+#include "sidebarwidget.h"
 
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QLabel>
 #include <QProcess>
 #include <QPushButton>
 #include <QTemporaryDir>
 #include <QTimer>
 
+#include <algorithm>
 #include <array>
 
 using logcat::DeviceWidget;
@@ -126,6 +130,18 @@ private:
         = { "PATH", "ANDROID_HOME", "ANDROID_SDK_ROOT" };
     QList<QByteArray> saved_;
 };
+
+/** The label among @p widget's children that shows @p text, or nullptr. */
+QLabel* labelShowing( const QWidget& widget, const QString& text )
+{
+    const auto labels = widget.findChildren<QLabel*>();
+    for ( auto* label : labels ) {
+        if ( label->text() == text ) {
+            return label;
+        }
+    }
+    return nullptr;
+}
 
 } // namespace
 
@@ -296,6 +312,39 @@ SCENARIO( "two sessions never write to the same file", "[devicewidget]" )
         widget.stopAll();
     }
 
+    GIVEN( "a session writing to a save path in the home directory, given with ~" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        QTemporaryDir home;
+        const logcat_test::ScopedEnv homeEnv( "HOME", QFile::encodeName( home.path() ) );
+        DeviceWidget widget;
+        REQUIRE( widget.startSession( "emulator-5554", "~/capture.log" ) );
+
+        WHEN( "starting a second device with the file's full path" )
+        {
+            const auto started
+                = widget.startSession( "emulator-5556", home.filePath( "capture.log" ) );
+
+            THEN( "it is refused" )
+            {
+                REQUIRE_FALSE( started );
+            }
+        }
+
+        WHEN( "starting a second device with ~ again" )
+        {
+            const auto started = widget.startSession( "emulator-5556", "~/capture.log" );
+
+            THEN( "it is refused" )
+            {
+                REQUIRE_FALSE( started );
+            }
+        }
+
+        widget.stopAll();
+    }
+
     GIVEN( "a session whose save file has been deleted while it runs" )
     {
         FakeHost host;
@@ -455,6 +504,53 @@ SCENARIO( "stopAll keeps temporary log files for their tabs", "[devicewidget]" )
 #endif
 
 #ifdef Q_OS_UNIX
+SCENARIO( "stopping all sessions waits for them together", "[devicewidget]" )
+{
+    GIVEN( "several sessions whose adb ignores SIGTERM" )
+    {
+        FakeHost host;
+        // sleep inherits the ignored SIGTERM, so only kill ends it.
+        logcat_test::installFakeAdb( host, "trap '' TERM\nprintf 'first\\n'\nexec sleep 30\n" );
+        auto* widget = new DeviceWidget;
+        constexpr int kSessions = 6;
+        QStringList serials;
+        for ( int i = 0; i < kSessions; ++i ) {
+            serials << QString( "emulator-%1" ).arg( 5554 + 2 * i );
+            REQUIRE( widget->startSession( serials.last() ) );
+        }
+        // Each adb has set its trap once it has written its first line.
+        REQUIRE( waitFor( [ widget, &serials ]() {
+            return std::all_of( serials.cbegin(), serials.cend(), [ widget ]( const auto& serial ) {
+                return widget->sessionLineCount( serial ) > 0;
+            } );
+        } ) );
+
+        WHEN( "all of them are stopped and the widget deleted, as at shutdown" )
+        {
+            QElapsedTimer timer;
+            timer.start();
+            widget->stopAll();
+            delete widget;
+            const auto elapsedMs = timer.elapsed();
+
+            THEN( "they are waited for together, not one after the other" )
+            {
+                // One after the other, each would take a second before it
+                // is killed: six seconds in all.
+                REQUIRE( elapsedMs < 4000 );
+            }
+
+            THEN( "each of them ends when it is killed" )
+            {
+                REQUIRE( host.logs.filter( "did not exit" ).isEmpty() );
+                REQUIRE( host.logs.filter( "Stopped logcat" ).size() == kSessions );
+            }
+        }
+    }
+}
+#endif
+
+#ifdef Q_OS_UNIX
 SCENARIO( "devices are discovered in the background", "[devicewidget]" )
 {
     GIVEN( "an adb whose device scan takes a while" )
@@ -566,6 +662,60 @@ SCENARIO( "devices are discovered in the background", "[devicewidget]" )
             {
                 REQUIRE( refresh->isEnabled() );
                 REQUIRE_FALSE( refresh->text().contains( "Scanning" ) );
+            }
+        }
+    }
+}
+#endif
+
+#ifdef Q_OS_UNIX
+SCENARIO( "a serial and an adb path are shown as plain text", "[devicewidget]" )
+{
+    // Any USB gadget can name itself; a label would render markup in its
+    // serial as rich text, and load what an <img> in it points to.
+    GIVEN( "a session for a device whose serial is markup" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        DeviceWidget widget;
+        const logcat::SidebarWidget sidebar( &widget );
+        const QString serial = "<b>emulator-5554</b>";
+        REQUIRE( Qt::mightBeRichText( serial ) );
+        REQUIRE( widget.startSession( serial ) );
+
+        THEN( "the sidebar's session list shows the serial as its literal text" )
+        {
+            QLabel* label = nullptr;
+            REQUIRE( waitFor( [ & ]() {
+                label = labelShowing( sidebar, serial );
+                return label != nullptr;
+            } ) );
+            REQUIRE( label->textFormat() == Qt::PlainText );
+        }
+
+        widget.stopAll();
+    }
+
+    GIVEN( "an adb path that is markup" )
+    {
+        FakeHost host;
+        const auto adb = host.configDir() + "/<b>adb";
+        {
+            QFile file( adb );
+            REQUIRE( file.open( QIODevice::WriteOnly ) );
+        }
+        logcat_test::useAdb( host, adb );
+        REQUIRE( Qt::mightBeRichText( adb.mid( adb.lastIndexOf( '/' ) + 1 ) ) );
+
+        WHEN( "the dialog shows it" )
+        {
+            const DeviceWidget widget;
+
+            THEN( "it is shown as its literal text" )
+            {
+                auto* label = labelShowing( widget, adb );
+                REQUIRE( label != nullptr );
+                REQUIRE( label->textFormat() == Qt::PlainText );
             }
         }
     }

@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   archive (#29).
 
 ### Changed
+- **The icon matches the other LogSquirl plugins.** The log lines stay
+  inside the frame the other plugin icons use (#45).
 - **Built against the plugin API of LogSquirl 26.12.** LogSquirl 26.11 and
   later start the plugin through `logsquirl_plugin_init_ex()` and tell it
   which of their functions it may use; LogSquirl 26.10 starts it as before,
@@ -38,6 +40,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plugin's start, shutdown, Configure or its menu entry is logged instead
   of escaping into LogSquirl; a start that fails is undone, the sidebar tab
   unregistered before its widget goes.
+- **A device serial and the ADB path are shown as they are.** A device can
+  report any serial; one that looks like HTML is shown as its literal text
+  in the sidebar's session list, never rendered, and so is the ADB path in
+  the dialog (#35).
+- **adb output without line breaks no longer fills the memory.** When adb,
+  or another program set as the ADB path, writes on and on without ending
+  a line, every megabyte is written to the log file as a line of its own;
+  what it writes to its error output is cut short in LogSquirl's log and
+  in the error shown (#36).
+- **Stopping all sessions takes two seconds at most.** Stop All, quitting
+  LogSquirl and disabling the plugin end every adb at once and wait for
+  them together, instead of up to two seconds for each device in turn; an
+  adb that does not exit even when killed is left behind rather than
+  waited for once more (#37).
+- **The Android SDK's adb is found on Windows.** The `adb.exe` in
+  `platform-tools` of `ANDROID_HOME` or `ANDROID_SDK_ROOT` is used again,
+  rather than whichever adb comes first in the PATH, which may be another
+  or an older one (#39).
+- **No ADB path is taken from a shared temporary directory.** Before it
+  is started by LogSquirl, the plugin reads no configuration at all,
+  instead of a `logcat.ini` in the temporary directory, where on Linux any
+  local user could have set the adb it runs (#40).
+- **A save path given with `~` works throughout.** Rotating such a
+  session continues in a new file next to it, instead of failing, and a
+  second device given the same `~/…` path is refused instead of writing
+  into the same file (#43).
 
 ## [0.4.0] — 2026-09-30
 
