@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **The icon matches the other LogSquirl plugins.** The log lines stay
-  inside the frame the other plugin icons use.
+  inside the frame the other plugin icons use (#45).
 - **Built against the plugin API of LogSquirl 26.12.** LogSquirl 26.11 and
   later start the plugin through `logsquirl_plugin_init_ex()` and tell it
   which of their functions it may use; LogSquirl 26.10 starts it as before,
