@@ -62,6 +62,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is started by LogSquirl, the plugin reads no configuration at all,
   instead of a `logcat.ini` in the temporary directory, where on Linux any
   local user could have set the adb it runs (#40).
+- **A save path given with `~` works throughout.** Rotating such a
+  session continues in a new file next to it, instead of failing, and a
+  second device given the same `~/…` path is refused instead of writing
+  into the same file (#43).
 
 ## [0.4.0] — 2026-09-30
 

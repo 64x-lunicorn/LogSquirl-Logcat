@@ -613,8 +613,14 @@ AdbProcess* DeviceWidget::takeSession( const QString& serial )
 
 bool DeviceWidget::isFileInUse( const QString& path ) const
 {
+    // The file a session writes to, as start() expands a path with ~.  A
+    // relative path, which start() refuses, is no session's file.
+    const auto file = AdbProcess::absoluteUserPath( path );
+    if ( file.isEmpty() ) {
+        return false;
+    }
     for ( const auto* proc : sessions_ ) {
-        if ( isSameFile( proc->tempFilePath(), path ) ) {
+        if ( isSameFile( proc->tempFilePath(), file ) ) {
             return true;
         }
     }

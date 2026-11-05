@@ -31,6 +31,7 @@
 #include "devicewidget.h"
 #include "fakeadb.h"
 #include "readonlydir.h"
+#include "scopedenv.h"
 #include "sidebarwidget.h"
 
 #include <QDir>
@@ -305,6 +306,39 @@ SCENARIO( "two sessions never write to the same file", "[devicewidget]" )
                 REQUIRE_FALSE( started );
                 REQUIRE_FALSE( widget.isSessionActive( "emulator-5556" ) );
                 REQUIRE( host.notifications.size() == 1 );
+            }
+        }
+
+        widget.stopAll();
+    }
+
+    GIVEN( "a session writing to a save path in the home directory, given with ~" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        QTemporaryDir home;
+        const logcat_test::ScopedEnv homeEnv( "HOME", QFile::encodeName( home.path() ) );
+        DeviceWidget widget;
+        REQUIRE( widget.startSession( "emulator-5554", "~/capture.log" ) );
+
+        WHEN( "starting a second device with the file's full path" )
+        {
+            const auto started
+                = widget.startSession( "emulator-5556", home.filePath( "capture.log" ) );
+
+            THEN( "it is refused" )
+            {
+                REQUIRE_FALSE( started );
+            }
+        }
+
+        WHEN( "starting a second device with ~ again" )
+        {
+            const auto started = widget.startSession( "emulator-5556", "~/capture.log" );
+
+            THEN( "it is refused" )
+            {
+                REQUIRE_FALSE( started );
             }
         }
 

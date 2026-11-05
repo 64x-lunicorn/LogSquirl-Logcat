@@ -33,6 +33,7 @@
 #include "fakeadb.h"
 #include "plugin.h"
 #include "readonlydir.h"
+#include "scopedenv.h"
 
 #include <QDir>
 #include <QElapsedTimer>
@@ -52,6 +53,7 @@
 using logcat::AdbProcess;
 using logcat_test::FakeHost;
 using logcat_test::ReadOnlyDir;
+using logcat_test::ScopedEnv;
 using logcat_test::waitFor;
 
 namespace {
@@ -69,34 +71,6 @@ void touch( const QString& path )
     REQUIRE( file.open( QIODevice::WriteOnly ) );
 }
 #endif
-
-/** Sets an environment variable for its lifetime, then restores it. */
-class ScopedEnv {
-public:
-    ScopedEnv( const char* name, const QByteArray& value )
-        : name_( name )
-        , saved_( qgetenv( name ) )
-    {
-        qputenv( name, value );
-    }
-
-    ~ScopedEnv()
-    {
-        if ( saved_.isNull() ) {
-            qunsetenv( name_ );
-        }
-        else {
-            qputenv( name_, saved_ );
-        }
-    }
-
-    ScopedEnv( const ScopedEnv& ) = delete;
-    ScopedEnv& operator=( const ScopedEnv& ) = delete;
-
-private:
-    const char* name_;
-    QByteArray saved_;
-};
 
 /**
  * Create an Android SDK in @p sdk with an adb in platform-tools, named as
@@ -398,6 +372,32 @@ SCENARIO( "rotateLog moves the capture to a new file", "[adbprocess]" )
                 REQUIRE( readFile( savePath ) == "first\nsecond\n" );
             }
         }
+    }
+
+    GIVEN( "a running session writing to a save path in the home directory, given with ~" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        QTemporaryDir home;
+        const ScopedEnv homeEnv( "HOME", QFile::encodeName( home.path() ) );
+
+        AdbProcess proc( "emulator-5554", "~/capture.log" );
+        REQUIRE( proc.start() );
+        REQUIRE( waitFor( [ &proc ]() { return proc.lineCount() == 2; } ) );
+
+        WHEN( "rotating" )
+        {
+            const auto newPath = proc.rotateLog();
+
+            THEN( "the capture continues in a new file in the home directory" )
+            {
+                REQUIRE_FALSE( newPath.isEmpty() );
+                REQUIRE( QFileInfo( newPath ).absolutePath() == QDir::cleanPath( home.path() ) );
+                REQUIRE( QFileInfo::exists( newPath ) );
+            }
+        }
+
+        proc.stop();
     }
 
     GIVEN( "a running session writing to a temporary file" )

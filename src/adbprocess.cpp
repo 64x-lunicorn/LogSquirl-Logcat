@@ -486,7 +486,9 @@ QString AdbProcess::rotateLog()
     // truncate an earlier capture.
     QString newPath;
     if ( usingSavePath_ ) {
-        newPath = generateLogPath( QFileInfo( savePath_ ).absolutePath(), serial_ );
+        // The directory start() wrote to: the save path as typed may start with ~.
+        newPath
+            = generateLogPath( QFileInfo( absoluteUserPath( savePath_ ) ).absolutePath(), serial_ );
     }
     else {
         newPath = tempDir_.filePath( QString( "logcat_%1_%2.log" )
