@@ -143,8 +143,9 @@ QString AdbProcess::configDir()
     if ( g_state.api && g_state.handle ) {
         return QString::fromUtf8( g_state.api->get_config_dir( g_state.handle ) );
     }
-    // Fallback for when plugin is not yet initialised (shouldn't happen in practice)
-    return QStandardPaths::writableLocation( QStandardPaths::TempLocation );
+    // No fallback: one in the temporary directory, /tmp on Linux, would
+    // let any local user set the adb that LogSquirl runs.
+    return {};
 }
 
 QString AdbProcess::findAdb()

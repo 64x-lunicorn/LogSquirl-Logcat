@@ -571,6 +571,10 @@ void DeviceWidget::updateUiState()
 void DeviceWidget::configureAdbPath( QWidget* parent )
 {
     const auto configDir = AdbProcess::configDir();
+    if ( configDir.isEmpty() ) {
+        hostLog( LOGSQUIRL_LOG_WARNING, "The ADB path cannot be configured: no config directory." );
+        return;
+    }
     QSettings settings( configDir + "/logcat.ini", QSettings::IniFormat );
     const auto currentPath = settings.value( "adb/path", "" ).toString();
     const auto detected = AdbProcess::findAdb();

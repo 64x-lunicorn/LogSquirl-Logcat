@@ -58,6 +58,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `platform-tools` of `ANDROID_HOME` or `ANDROID_SDK_ROOT` is used again,
   rather than whichever adb comes first in the PATH, which may be another
   or an older one (#39).
+- **No ADB path is taken from a shared temporary directory.** Before it
+  is started by LogSquirl, the plugin reads no configuration at all,
+  instead of a `logcat.ini` in the temporary directory, where on Linux any
+  local user could have set the adb it runs (#40).
 
 ## [0.4.0] — 2026-09-30
 

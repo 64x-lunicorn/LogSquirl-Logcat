@@ -149,8 +149,8 @@ public:
                                     const QDateTime& timestamp = QDateTime::currentDateTime() );
 
     /**
-     * Return the plugin's config directory from the host API.
-     * Falls back to a temp path if the plugin is not initialised.
+     * Return the plugin's config directory from the host API.  Empty while
+     * the plugin is not initialised: callers then use no configuration.
      */
     static QString configDir();
 

@@ -38,6 +38,7 @@
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QSettings>
 #include <QTemporaryDir>
 
 #ifdef Q_OS_UNIX
@@ -145,23 +146,39 @@ SCENARIO( "AdbProcess construction and properties", "[adbprocess]" )
     }
 }
 
-SCENARIO( "configDir falls back to temp when plugin is not initialised", "[adbprocess]" )
+SCENARIO( "no adb override is read while the plugin is not initialised", "[adbprocess]" )
 {
-    GIVEN( "the plugin is not initialised (g_state.api is null)" )
+    GIVEN( "the plugin is not initialised, and a logcat.ini in the temporary directory" )
     {
         // Ensure clean state — no host API available.
         logcat::g_state.api = nullptr;
         logcat::g_state.handle = nullptr;
         logcat::g_state.initialised = false;
 
-        WHEN( "calling configDir()" )
+        // A temporary directory that every local user can write to, such
+        // as /tmp, with an override another user planted.
+        QTemporaryDir sharedTemp;
+        const ScopedEnv tmpdir( "TMPDIR", QFile::encodeName( sharedTemp.path() ) );
+        const ScopedEnv tmp( "TMP", QFile::encodeName( sharedTemp.path() ) );
+        const ScopedEnv temp( "TEMP", QFile::encodeName( sharedTemp.path() ) );
+        const auto planted = sharedTemp.filePath( "planted-adb" );
         {
-            const auto dir = AdbProcess::configDir();
+            QFile file( planted );
+            REQUIRE( file.open( QIODevice::WriteOnly ) );
+        }
+        {
+            QSettings settings( sharedTemp.filePath( "logcat.ini" ), QSettings::IniFormat );
+            settings.setValue( "adb/path", planted );
+        }
 
-            THEN( "a non-empty temporary path is returned" )
-            {
-                REQUIRE_FALSE( dir.isEmpty() );
-            }
+        THEN( "configDir() is empty" )
+        {
+            REQUIRE( AdbProcess::configDir().isEmpty() );
+        }
+
+        THEN( "findAdb() does not use the planted override" )
+        {
+            REQUIRE_FALSE( isSameFile( AdbProcess::findAdb(), planted ) );
         }
     }
 }
