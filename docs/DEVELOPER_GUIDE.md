@@ -82,6 +82,7 @@ Every plugin must include a `plugin.json` file in its install directory.
 | `author`      | No       | Author or organisation name. |
 | `license`     | No       | SPDX license identifier. |
 | `url`         | No       | Homepage or repository URL. |
+| `formats`, `predefined_filters`, `highlighter_sets` | No | Files beside the library that LogSquirl 26.12 and later read while the plugin is enabled: Log Formats, exported Filter Groups and Highlighter Sets (LogSquirl's `docs/plugin-sdk.md`). Older hosts ignore the keys. This plugin ships a filter group and a highlighter set from `presets/`, packaged flat beside the library (`package_files` in `.github/plugin-ci.json`), so the manifest names them by their base names. |
 
 ### Plugin Types
 

@@ -85,6 +85,11 @@ set(PLUGIN_INSTALL_DIR
 
 install(TARGETS logsquirl_logcat LIBRARY DESTINATION "${PLUGIN_INSTALL_DIR}")
 install(FILES   plugin.json              DESTINATION "${PLUGIN_INSTALL_DIR}")
+# The filter group and highlighter set, next to the library as plugin.json
+# names them: LogSquirl 26.12 reads them from there, older hosts import them
+# (README).
+install(FILES   presets/logcat_filter.conf presets/logcat_highlighter.conf
+        DESTINATION "${PLUGIN_INSTALL_DIR}")
 
 # ── Tests (opt-in) ────────────────────────────────────────────────────────
 option(BUILD_TESTS "Build unit tests" OFF)

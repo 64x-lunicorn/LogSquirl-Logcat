@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **A Logcat filter group and a Logcat levels highlighter set.** The filter
+  group *Logcat* has *Crashes* (Java and native crashes, tombstones and the
+  crash buffer), *ANRs* and *Errors and worse*; the highlighter set *Logcat
+  levels* colours fatal, error and warning lines. On LogSquirl 26.12 and
+  later they are listed while the plugin is enabled, with nothing to
+  import; on an older LogSquirl, import the two files from the release
+  archive (#29).
+
 ## [0.4.0] — 2026-09-30
 
 ### Changed

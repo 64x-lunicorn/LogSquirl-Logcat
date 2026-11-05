@@ -1,4 +1,8 @@
 {
   "host_ref": "v26.10.0",
+  "package_files": [
+    "presets/logcat_filter.conf",
+    "presets/logcat_highlighter.conf"
+  ],
   "sanitizers": true
 }
