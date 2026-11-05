@@ -34,8 +34,19 @@
 #include "plugin.h"
 #include "readonlydir.h"
 
+#include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
+
+#ifdef Q_OS_UNIX
+#include <csignal>
+#include <sys/resource.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#endif
 
 using logcat::AdbProcess;
 using logcat_test::FakeHost;
@@ -462,6 +473,169 @@ SCENARIO( "adb's stderr reaches the user", "[adbprocess]" )
                 REQUIRE( errors.first().contains( "device 'emulator-5554' not found" ) );
             }
         }
+    }
+}
+#endif
+
+SCENARIO( "a typed path is made absolute, and a relative one refused", "[adbprocess]" )
+{
+    THEN( "~ is the home directory, and the path is cleaned" )
+    {
+        REQUIRE( AdbProcess::absoluteUserPath( "~" ) == QDir::homePath() );
+        REQUIRE( AdbProcess::absoluteUserPath( " ~/logs/x.log " )
+                 == QDir::homePath() + "/logs/x.log" );
+        const auto root = QDir::rootPath();
+        REQUIRE( AdbProcess::absoluteUserPath( root + "a/../b/c.log" ) == root + "b/c.log" );
+    }
+
+    THEN( "a relative path, or none, is empty" )
+    {
+        REQUIRE( AdbProcess::absoluteUserPath( "out.log" ).isEmpty() );
+        REQUIRE( AdbProcess::absoluteUserPath( "logs/out.log" ).isEmpty() );
+        REQUIRE( AdbProcess::absoluteUserPath( "~user/x.log" ).isEmpty() );
+        REQUIRE( AdbProcess::absoluteUserPath( "  " ).isEmpty() );
+    }
+
+    GIVEN( "a session with a relative save path" )
+    {
+        FakeHost host;
+        AdbProcess proc( "emulator-5554", "relative-capture.log" );
+        QStringList errors;
+        QObject::connect( &proc, &AdbProcess::errorOccurred,
+                          [ &errors ]( const QString& message ) { errors << message; } );
+
+        WHEN( "it is started" )
+        {
+            const auto started = proc.start();
+
+            THEN( "it does not start, says why, and creates nothing in the working directory" )
+            {
+                REQUIRE_FALSE( started );
+                REQUIRE( errors.size() == 1 );
+                REQUIRE( errors.first().contains( "not a full path" ) );
+                REQUIRE_FALSE( QFileInfo::exists( "relative-capture.log" ) );
+                REQUIRE( proc.tempFilePath().isEmpty() );
+            }
+        }
+    }
+}
+
+#ifdef Q_OS_UNIX
+SCENARIO( "only a regular file is opened as the save path", "[adbprocess]" )
+{
+    GIVEN( "a save path that is a FIFO" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        QTemporaryDir logDir;
+        const auto fifo = logDir.filePath( "capture.log" );
+        REQUIRE( ::mkfifo( QFile::encodeName( fifo ).constData(), 0600 ) == 0 );
+        AdbProcess proc( "emulator-5554", fifo );
+        QStringList errors;
+        QObject::connect( &proc, &AdbProcess::errorOccurred,
+                          [ &errors ]( const QString& message ) { errors << message; } );
+
+        WHEN( "it is started" )
+        {
+            QElapsedTimer timer;
+            timer.start();
+            const auto started = proc.start();
+
+            THEN( "it is refused at once, without waiting for a reader" )
+            {
+                REQUIRE_FALSE( started );
+                REQUIRE( timer.elapsed() < 2000 );
+                REQUIRE( errors.size() == 1 );
+                REQUIRE( errors.first().contains( "not a regular file" ) );
+            }
+        }
+    }
+
+    GIVEN( "a save path that is a symlink to a file that does not exist" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        QTemporaryDir logDir;
+        const auto target = logDir.filePath( "elsewhere.log" );
+        const auto link = logDir.filePath( "capture.log" );
+        REQUIRE( QFile::link( target, link ) );
+        AdbProcess proc( "emulator-5554", link );
+
+        WHEN( "it is started" )
+        {
+            const auto started = proc.start();
+
+            THEN( "it is refused, and the link's target is not created" )
+            {
+                REQUIRE_FALSE( started );
+                REQUIRE_FALSE( QFileInfo::exists( target ) );
+            }
+        }
+    }
+
+    GIVEN( "a save path that does not exist yet" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        QTemporaryDir logDir;
+        const auto savePath = logDir.filePath( "capture.log" );
+        AdbProcess proc( "emulator-5554", savePath );
+
+        WHEN( "it is started" )
+        {
+            REQUIRE( proc.start() );
+
+            THEN( "the file it creates is readable by the user only" )
+            {
+                struct stat info{};
+                REQUIRE( ::stat( QFile::encodeName( savePath ).constData(), &info ) == 0 );
+                REQUIRE( ( info.st_mode & 0777 ) == 0600 );
+            }
+
+            proc.stop();
+        }
+    }
+}
+
+SCENARIO( "a log file that cannot be written stops the session and says why", "[adbprocess]" )
+{
+    GIVEN( "a session whose log file may grow by a few bytes only" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        QTemporaryDir logDir;
+        const auto savePath = logDir.filePath( "capture.log" );
+        AdbProcess proc( "emulator-5554", savePath );
+        QStringList errors;
+        QObject::connect( &proc, &AdbProcess::errorOccurred,
+                          [ &errors ]( const QString& message ) { errors << message; } );
+
+        // A file size limit makes every write past it fail with EFBIG, as a
+        // full disk fails it; the signal it would send is ignored.
+        struct rlimit before{};
+        REQUIRE( ::getrlimit( RLIMIT_FSIZE, &before ) == 0 );
+        const auto oldHandler = std::signal( SIGXFSZ, SIG_IGN );
+        struct rlimit tiny = before;
+        tiny.rlim_cur = 8;
+        REQUIRE( ::setrlimit( RLIMIT_FSIZE, &tiny ) == 0 );
+
+        WHEN( "adb writes more than that" )
+        {
+            REQUIRE( proc.start() );
+            const bool stopped = waitFor( [ &proc ]() { return !proc.isRunning(); } );
+            ::setrlimit( RLIMIT_FSIZE, &before );
+
+            THEN( "the session stops, and the failure is reported once, naming the file" )
+            {
+                REQUIRE( stopped );
+                REQUIRE( errors.size() == 1 );
+                REQUIRE( errors.first().contains( "Could not write the log file" ) );
+                REQUIRE( errors.first().contains( savePath ) );
+            }
+        }
+
+        ::setrlimit( RLIMIT_FSIZE, &before );
+        std::signal( SIGXFSZ, oldHandler );
     }
 }
 #endif

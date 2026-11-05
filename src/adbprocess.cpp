@@ -55,6 +55,14 @@
 #include <QSettings>
 #include <QStandardPaths>
 
+#ifdef Q_OS_UNIX
+#include <cerrno>
+#include <cstring>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
 namespace logcat {
 
 namespace {
@@ -216,6 +224,22 @@ QList<QByteArray> AdbProcess::takeLines( QByteArray& buffer )
     return lines;
 }
 
+QString AdbProcess::absoluteUserPath( const QString& path )
+{
+    auto expanded = path.trimmed();
+    if ( expanded == QStringLiteral( "~" ) ) {
+        expanded = QDir::homePath();
+    }
+    else if ( expanded.startsWith( QStringLiteral( "~/" ) )
+              || expanded.startsWith( QStringLiteral( "~\\" ) ) ) {
+        expanded = QDir::homePath() + expanded.mid( 1 );
+    }
+    if ( expanded.isEmpty() || QDir::isRelativePath( expanded ) ) {
+        return {};
+    }
+    return QDir::cleanPath( expanded );
+}
+
 QString AdbProcess::generateLogPath( const QString& dir, const QString& serial,
                                      const QDateTime& timestamp )
 {
@@ -255,8 +279,15 @@ bool AdbProcess::start()
     QString path;
     QIODevice::OpenMode mode = QIODevice::WriteOnly;
     if ( !savePath_.isEmpty() ) {
-        QDir().mkpath( QFileInfo( savePath_ ).absolutePath() );
-        path = savePath_;
+        path = absoluteUserPath( savePath_ );
+        if ( path.isEmpty() ) {
+            Q_EMIT errorOccurred(
+                QString( "The log file %1 is not a full path; give one such as "
+                         "%2." )
+                    .arg( savePath_, QDir( QDir::homePath() ).filePath( "logcat.log" ) ) );
+            return false;
+        }
+        QDir().mkpath( QFileInfo( path ).absolutePath() );
         mode |= QIODevice::Append;
     }
     else {
@@ -269,14 +300,16 @@ bool AdbProcess::start()
     }
 
     createdLogFile_ = !QFileInfo::exists( path );
-    tempFile_.setFileName( path );
-    if ( !tempFile_.open( mode ) ) {
-        Q_EMIT errorOccurred( "Failed to open log file: " + tempFile_.errorString() );
+    QString openError;
+    if ( !openLogFile( path, mode, openError ) ) {
+        Q_EMIT errorOccurred( "Failed to open log file " + path + ": " + openError );
         tempFile_.setFileName( {} );
+        logPath_.clear();
         return false;
     }
     usingSavePath_ = !savePath_.isEmpty();
 
+    writeFailed_ = false;
     lineCount_ = 0;
     readBuffer_.clear();
     stderrBuffer_.clear();
@@ -379,17 +412,16 @@ QString AdbProcess::rotateLog()
     }
 
     // Close the old file (it stays on disk for the old tab)
-    const auto oldPath = tempFile_.fileName();
+    const auto oldPath = logPath_;
     tempFile_.close();
 
-    tempFile_.setFileName( newPath );
-    if ( !tempFile_.open( QIODevice::WriteOnly | QIODevice::NewOnly ) ) {
-        const auto reason = tempFile_.errorString();
+    QString reason;
+    if ( !openLogFile( newPath, QIODevice::WriteOnly | QIODevice::NewOnly, reason ) ) {
 
         // Keep capturing into the old file: a session left running with a
         // closed file would silently drop everything from here on.
-        tempFile_.setFileName( oldPath );
-        if ( tempFile_.open( QIODevice::WriteOnly | QIODevice::Append ) ) {
+        QString reopenError;
+        if ( openLogFile( oldPath, QIODevice::WriteOnly | QIODevice::Append, reopenError ) ) {
             Q_EMIT errorOccurred( QString( "Could not rotate the log to %1 (%2); "
                                            "still writing to %3." )
                                       .arg( newPath, reason, oldPath ) );
@@ -397,7 +429,7 @@ QString AdbProcess::rotateLog()
         else {
             Q_EMIT errorOccurred( QString( "Could not rotate the log to %1 (%2), nor reopen "
                                            "%3 (%4); logcat stopped." )
-                                      .arg( newPath, reason, oldPath, tempFile_.errorString() ) );
+                                      .arg( newPath, reason, oldPath, reopenError ) );
             stop();
         }
         return {};
@@ -420,25 +452,113 @@ bool AdbProcess::isRunning() const
 
 QString AdbProcess::tempFilePath() const
 {
-    return tempFile_.fileName();
+    return logPath_;
 }
 
 // ── Private helpers ─────────────────────────────────────────────────────
 
-void AdbProcess::writeLine( const QByteArray& line )
+bool AdbProcess::writeLine( const QByteArray& line )
 {
-    tempFile_.write( line );
-    tempFile_.write( "\n", 1 );
+    if ( writeFailed_ ) {
+        return false;
+    }
+    if ( tempFile_.write( line ) != line.size() || tempFile_.write( "\n", 1 ) != 1 ) {
+        failWrite();
+        return false;
+    }
     ++lineCount_;
+    return true;
+}
+
+bool AdbProcess::flushLogFile()
+{
+    if ( writeFailed_ ) {
+        return false;
+    }
+    if ( !tempFile_.flush() ) {
+        failWrite();
+        return false;
+    }
+    return true;
+}
+
+void AdbProcess::failWrite()
+{
+    if ( writeFailed_ ) {
+        return;
+    }
+    writeFailed_ = true;
+    Q_EMIT errorOccurred( QString( "Could not write the log file %1 (%2); logcat stopped." )
+                              .arg( logPath_, tempFile_.errorString() ) );
+    // Not from inside the slot that is reading adb's output.
+    QMetaObject::invokeMethod( this, &AdbProcess::stop, Qt::QueuedConnection );
+}
+
+bool AdbProcess::openLogFile( const QString& path, QIODevice::OpenMode mode, QString& error )
+{
+    tempFile_.setFileName( path );
+#ifdef Q_OS_UNIX
+    // One open that cannot block on a FIFO nor follow a symlink, then a
+    // check of what was opened: a check before the open could be raced.
+    int flags = O_WRONLY | O_CREAT | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC;
+    flags |= mode.testFlag( QIODevice::NewOnly ) ? O_EXCL : 0;
+    flags |= mode.testFlag( QIODevice::Append ) ? O_APPEND : 0;
+    const int fd = ::open( QFile::encodeName( path ).constData(), flags, S_IRUSR | S_IWUSR );
+    if ( fd < 0 ) {
+        // A FIFO without a reader (ENXIO) and a symlink (ELOOP) are what
+        // the flags refuse; anything else is the system's own reason.
+        if ( errno == ENXIO ) {
+            error = QStringLiteral( "not a regular file" );
+        }
+        else if ( errno == ELOOP ) {
+            error = QStringLiteral( "a symbolic link, not a regular file" );
+        }
+        else {
+            error = QString::fromLocal8Bit( std::strerror( errno ) );
+        }
+        return false;
+    }
+    struct stat info{};
+    if ( ::fstat( fd, &info ) != 0 || !S_ISREG( info.st_mode ) ) {
+        ::close( fd );
+        error = QStringLiteral( "not a regular file" );
+        return false;
+    }
+    // A regular file never blocks; the flag only kept the open from waiting.
+    ::fcntl( fd, F_SETFL, ::fcntl( fd, F_GETFL ) & ~O_NONBLOCK );
+    if ( !tempFile_.open( fd, mode & ~QIODevice::NewOnly, QFileDevice::AutoCloseHandle ) ) {
+        ::close( fd );
+        error = tempFile_.errorString();
+        return false;
+    }
+    logPath_ = path;
+    return true;
+#else
+    const QFileInfo info( path );
+    if ( info.isSymLink() || ( info.exists() && !info.isFile() ) ) {
+        error = QStringLiteral( "not a regular file" );
+        return false;
+    }
+    if ( !tempFile_.open( mode ) ) {
+        error = tempFile_.errorString();
+        return false;
+    }
+    if ( mode.testFlag( QIODevice::NewOnly ) || !info.exists() ) {
+        tempFile_.setPermissions( QFileDevice::ReadOwner | QFileDevice::WriteOwner );
+    }
+    logPath_ = path;
+    return true;
+#endif
 }
 
 void AdbProcess::discardLogFile()
 {
     tempFile_.close();
-    if ( createdLogFile_ ) {
-        tempFile_.remove();
+    if ( createdLogFile_ && !logPath_.isEmpty() ) {
+        QFile::remove( logPath_ );
     }
     tempFile_.setFileName( {} );
+    logPath_.clear();
 }
 
 void AdbProcess::flushPartialLine()
@@ -450,8 +570,9 @@ void AdbProcess::flushPartialLine()
     if ( readBuffer_.endsWith( '\r' ) ) {
         readBuffer_.chop( 1 );
     }
-    writeLine( readBuffer_ );
-    tempFile_.flush();
+    if ( writeLine( readBuffer_ ) ) {
+        flushLogFile();
+    }
     readBuffer_.clear();
 }
 
@@ -463,9 +584,11 @@ void AdbProcess::onReadyRead()
 
     const auto lines = takeLines( readBuffer_ );
     for ( const auto& line : lines ) {
-        writeLine( line );
+        if ( !writeLine( line ) ) {
+            return;
+        }
     }
-    tempFile_.flush();
+    flushLogFile();
 }
 
 void AdbProcess::onReadyReadStandardError()
