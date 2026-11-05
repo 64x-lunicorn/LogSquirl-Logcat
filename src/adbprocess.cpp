@@ -261,6 +261,15 @@ bool AdbProcess::start()
         return true;
     }
 
+    // The path the user typed is checked first: it is theirs to fix,
+    // whether or not adb is found.
+    if ( !savePath_.isEmpty() && absoluteUserPath( savePath_ ).isEmpty() ) {
+        Q_EMIT errorOccurred(
+            QString( "The log file %1 is not a full path; give one such as %2." )
+                .arg( savePath_, QDir( QDir::homePath() ).filePath( "logcat.log" ) ) );
+        return false;
+    }
+
     const auto adb = findAdb();
     if ( adb.isEmpty() ) {
         Q_EMIT errorOccurred( "ADB executable not found.\n\n"
@@ -280,13 +289,6 @@ bool AdbProcess::start()
     QIODevice::OpenMode mode = QIODevice::WriteOnly;
     if ( !savePath_.isEmpty() ) {
         path = absoluteUserPath( savePath_ );
-        if ( path.isEmpty() ) {
-            Q_EMIT errorOccurred(
-                QString( "The log file %1 is not a full path; give one such as "
-                         "%2." )
-                    .arg( savePath_, QDir( QDir::homePath() ).filePath( "logcat.log" ) ) );
-            return false;
-        }
         QDir().mkpath( QFileInfo( path ).absolutePath() );
         mode |= QIODevice::Append;
     }
