@@ -324,8 +324,13 @@ QString SidebarWidget::generateSavePath( const QString& serial ) const
         dir = cfgDir + "/logs";
     }
 
-    // Ensure the directory exists
-    QDir().mkpath( dir );
+    // Ensure the directory exists.  A relative one is left as it is:
+    // AdbProcess::start() refuses it with a message, rather than create it
+    // in LogSquirl's working directory.
+    if ( const auto absolute = AdbProcess::absoluteUserPath( dir ); !absolute.isEmpty() ) {
+        dir = absolute;
+        QDir().mkpath( dir );
+    }
 
     // Format: YYYY-MM-dd_HHmmss_<serial>.log
     return AdbProcess::generateLogPath( dir, serial );

@@ -148,6 +148,15 @@ public:
      */
     static QString configDir();
 
+    /**
+     * The path a user typed, made absolute: a leading `~` is the home
+     * directory, and the path is cleaned.  Empty for a path that is still
+     * relative, as `open_file()` takes absolute paths only and LogSquirl's
+     * working directory is nothing the user chose (`/` when started from
+     * the Finder or the Dock).
+     */
+    static QString absoluteUserPath( const QString& path );
+
     /// How long start() waits for adb to launch before giving up.
     static constexpr int kStartTimeoutMs = 5000;
 
@@ -263,8 +272,19 @@ private:
      */
     void endProcess();
 
-    /** Write one line to the log file, terminated by "\n". */
-    void writeLine( const QByteArray& line );
+    /// Write @p line and a newline; false, after failWrite(), if the log
+    /// file cannot be written.
+    bool writeLine( const QByteArray& line );
+    /// Flush the log file; false, after failWrite(), if it cannot be written.
+    bool flushLogFile();
+    /// The log file cannot be written (disk full, volume gone): say so once
+    /// and stop the session, rather than drop every line from here on.
+    void failWrite();
+    /// Open @p path for the capture with @p mode, refusing anything that is
+    /// not a regular file: a FIFO would block the UI thread, a symlink lead
+    /// elsewhere.  A file it creates is readable by the user only.  False,
+    /// with the reason in tempFile_.errorString() or @p error.
+    bool openLogFile( const QString& path, QIODevice::OpenMode mode, QString& error );
 
     /** Write out a buffered partial line, e.g. before the file is closed. */
     void flushPartialLine();
@@ -278,6 +298,9 @@ private:
     QProcess process_;
     QTemporaryDir tempDir_;
     QFile tempFile_;
+    /// The log file open in tempFile_, which an open by descriptor leaves
+    /// without a name; empty while none is.
+    QString logPath_;
     QByteArray readBuffer_;   ///< Accumulates partial lines from stdout.
     QByteArray stderrBuffer_; ///< Accumulates partial lines from stderr.
     QString lastStderrLine_;  ///< Last line adb wrote to stderr.
@@ -286,6 +309,7 @@ private:
     bool usingSavePath_ = false;  ///< True when writing directly to the log directory.
     bool createdLogFile_ = false; ///< True when start() created the log file.
     bool stopping_ = false;       ///< True while stop() ends the process.
+    bool writeFailed_ = false;    ///< The log file could not be written; the session stops.
 };
 
 } // namespace logcat
