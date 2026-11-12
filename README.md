@@ -42,7 +42,7 @@ viewer where your other logs already are.
 | **Finds `adb` itself.** Looks in `ANDROID_HOME`, `ANDROID_SDK_ROOT`, `PATH` and the usual platform locations; override it in the settings dialog. | **Every device its own tab.** Start as many as you like — each opens in follow mode and keeps streaming. |
 | **Devices found for you.** A device you plug in gets its tile in the sidebar by itself; devices seen before stay until you forget them. | **Nothing lost on stop.** Captured output stays in the tab after the session ends. |
 | **Written to disk.** Configurable log directory, automatic `YYYY-MM-dd_HHmmss_<serial>.log` names, or a save path per device. | **Filter with the host.** No filter UI of its own — LogSquirl's regex search and highlighters do it better. |
-| **One tile per device.** Start, stop and rotate from the device's tile, which shows whether it is connected, unauthorized or offline. | **A worked example.** Heavily commented reference implementation for the Plugin SDK. |
+| **One tile per device.** Start, stop and rotate from the device's tile, which shows whether it is connected, unauthorized or offline, and while it runs, its lines, bytes, lines/s and file size, live. | **A worked example.** Heavily commented reference implementation for the Plugin SDK. |
 
 ## Install
 
@@ -88,8 +88,9 @@ After installing, restart LogSquirl or re-scan via *Plugins → Manage Plugins�
    device**.
 
    <!-- screenshot: docs/images/sidebar.png — the Logcat sidebar tab with
-        three tiles: one running, one connected, one unplugged (greyed, with
-        Forget). -->
+        three tiles: one running (its details: running time, lines/s, lines,
+        bytes, file size, rotations; ↻ Rotate), one connected, one unplugged
+        (greyed, with Forget). -->
 
    > **Screenshot pending:** the Logcat sidebar tab.
 
@@ -101,6 +102,11 @@ After installing, restart LogSquirl or re-scan via *Plugins → Manage Plugins�
      **offline** or **disconnected**. Only a connected device can be started.
    - **Start** — Begin capturing logcat for the device. A new tab opens in
      LogSquirl with live output in follow mode.
+   - **While it runs**, the tile shows the capture's details, updated every
+     second: how long it runs and the lines per second, the lines and bytes
+     since Start, the size of the current file and how often it was rotated,
+     and when it rotates next (on request: logcat has no size limit). A
+     stopped tile shows only the device.
    - **Stop** — Stop the capture. The tab remains open with all captured
      output preserved.
    - **↻ Rotate** (while it runs) — Go on in a new file, in a new tab; the
@@ -141,7 +147,7 @@ until then each has a marked placeholder above:
 
 | File | Shows |
 |------|-------|
-| `docs/images/sidebar.png` | The Logcat sidebar tab: a running, a connected and an unplugged (greyed) tile |
+| `docs/images/sidebar.png` | The Logcat sidebar tab: a running tile with its details and ↻ Rotate, a connected and an unplugged (greyed) tile |
 | `docs/images/settings.png` | The settings dialog: the log directory and the detected adb |
 
 ### Filters and highlighters

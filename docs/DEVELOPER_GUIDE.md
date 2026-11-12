@@ -357,9 +357,11 @@ classDiagram
     class SidebarWidget {
         -QHash~QString, DeviceTile*~ tileBySerial_
         -QTimer* scanTimer_
+        -QTimer* pollTimer_
         -Sessions* sessions_
         -DeviceStore* store_
         +reload()
+        +pollCounters()
     }
 
     class DeviceTile {
@@ -443,13 +445,33 @@ stands for a device, not for a saved configuration:
   the ADB path.
 - **Kept, not rebuilt.** `reload()` adds, removes, reorders and updates the
   tiles, so a rescan does not rebuild them under the mouse.
-- **Where a running session's details go.** `DeviceTile::setDetails()` shows
-  lines below a separator, hidden without any; `SidebarWidget::updateTile()`
-  is where a running session's counters (`Sessions::counters()`) are to be set.
+- **A running tile's details.** Below a separator (`DeviceTile::setDetails()`)
+  a running tile shows its session's counters (`Sessions::counters()`), as
+  `sessionDetails()` writes them:
+
+  ```
+  running 1:02:03 · 120 lines/s     time since Start, lines per second
+  12,345 lines · 1.2 MB             since Start, over all its files
+  file 512.0 KB · 2 rotations       the current file, rotations so far
+  rotates on request                when it rotates next
+  ```
+
+  A session's lines emit no signal, so the tab polls the counters every
+  `SidebarWidget::kCounterPollMs` (1 s, the timer `counterPoll`,
+  `pollCounters()`); the lines per second are those between two polls (0 at a
+  session's first poll), as in LogSquirl-NATS's tiles. Logcat has no size
+  limit, so the next rotation is "on request" (**↻ Rotate**); were
+  `SessionCounters::nextRotationBytes` set, it would say at which size. Sizes
+  are in units of 1024 to a tenth (`formatSize()`: `1.2 MB`), durations
+  `m:ss` or `h:mm:ss` (`formatDuration()`), counts with commas
+  (`formatCount()`); these are pure functions, tested on their own. A stopped
+  tile shows only the device.
 
 The tile knows nothing of adb: it is tested on its own through its named
 children (`devicetile_test.cpp`), the tab through the tiles over a fake adb
-whose device list the test rewrites (`sidebarwidget_test.cpp`).
+whose device list the test rewrites (`sidebarwidget_test.cpp`); the counters
+are tested over a fake adb that prints more lines when told to, the test
+calling `pollCounters()` itself where it measures a rate.
 
 ### When to use a UI plugin
 

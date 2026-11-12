@@ -37,18 +37,21 @@
 #include "sessions.h"
 #include "settingsdialog.h"
 
+#include <QDateTime>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFileDialog>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QLocale>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QTimer>
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <iterator>
 
 namespace logcat {
 
@@ -105,6 +108,72 @@ QString deviceTitle( const QString& serial, const QString& model )
     return QStringLiteral( "%1 · %2" ).arg( model, shown );
 }
 
+QString formatCount( qint64 count )
+{
+    // English, as every other word of the tile.
+    return QLocale( QLocale::English, QLocale::UnitedStates ).toString( count );
+}
+
+QString formatSize( qint64 bytes )
+{
+    constexpr qint64 kUnit = 1024;
+    if ( bytes < kUnit ) {
+        return QStringLiteral( "%1 B" ).arg( bytes );
+    }
+    static const char* const units[] = { "KB", "MB", "GB", "TB" };
+    double value = static_cast<double>( bytes ) / kUnit;
+    std::size_t unit = 0;
+    while ( value >= kUnit && unit + 1 < std::size( units ) ) {
+        value /= kUnit;
+        ++unit;
+    }
+    return QStringLiteral( "%1 %2" ).arg( value, 0, 'f', 1 ).arg( QLatin1String( units[ unit ] ) );
+}
+
+QString formatDuration( qint64 seconds )
+{
+    seconds = std::max<qint64>( seconds, 0 );
+    const auto hours = seconds / 3600;
+    const auto minutes = seconds / 60 % 60;
+    const auto secs = seconds % 60;
+    if ( hours > 0 ) {
+        return QStringLiteral( "%1:%2:%3" )
+            .arg( hours )
+            .arg( minutes, 2, 10, QLatin1Char( '0' ) )
+            .arg( secs, 2, 10, QLatin1Char( '0' ) );
+    }
+    return QStringLiteral( "%1:%2" ).arg( minutes ).arg( secs, 2, 10, QLatin1Char( '0' ) );
+}
+
+qint64 ratePerSecond( qint64 count, qint64 elapsedMs )
+{
+    if ( count <= 0 || elapsedMs <= 0 ) {
+        return 0;
+    }
+    return count * 1000 / elapsedMs;
+}
+
+QStringList sessionDetails( const SessionCounters& counters, qint64 linesPerSecond,
+                            const QDateTime& now )
+{
+    const auto rotations = counters.rotations == 1
+                               ? QStringLiteral( "1 rotation" )
+                               : QStringLiteral( "%1 rotations" ).arg( counters.rotations );
+    const auto next
+        = counters.nextRotationBytes > 0
+              ? QStringLiteral( "rotates at %1" ).arg( formatSize( counters.nextRotationBytes ) )
+              : QStringLiteral( "rotates on request" );
+    return {
+        QStringLiteral( "running %1 · %2 lines/s" )
+            .arg( formatDuration( counters.startTime.secsTo( now ) ),
+                  formatCount( linesPerSecond ) ),
+        QStringLiteral( "%1 lines · %2" )
+            .arg( formatCount( counters.lines ), formatSize( counters.bytes ) ),
+        QStringLiteral( "file %1 · %2" ).arg( formatSize( counters.fileBytes ), rotations ),
+        next,
+    };
+}
+
 // ── Construction ────────────────────────────────────────────────────────
 
 SidebarWidget::SidebarWidget( DeviceStore* store, Sessions* sessions, QWidget* parent )
@@ -117,6 +186,7 @@ SidebarWidget::SidebarWidget( DeviceStore* store, Sessions* sessions, QWidget* p
           this ) )
     , tiles_( new QVBoxLayout )
     , scanTimer_( new QTimer( this ) )
+    , pollTimer_( new QTimer( this ) )
 {
     auto* settings = new QPushButton( QStringLiteral( "Settings…" ), this );
     settings->setObjectName( "settings" );
@@ -169,6 +239,12 @@ SidebarWidget::SidebarWidget( DeviceStore* store, Sessions* sessions, QWidget* p
     scanTimer_->setInterval( kScanIntervalMs );
     connect( scanTimer_, &QTimer::timeout, sessions_, &Sessions::refreshDevices );
     scanTimer_->start();
+
+    // A running session's lines emit no signal: its tile polls them.
+    pollTimer_->setObjectName( "counterPoll" );
+    pollTimer_->setInterval( kCounterPollMs );
+    connect( pollTimer_, &QTimer::timeout, this, &SidebarWidget::pollCounters );
+    pollTimer_->start();
 
     // Sessions has started the first device scan; devicesChanged() fills
     // in the result.
@@ -294,6 +370,40 @@ void SidebarWidget::updateTile( DeviceTile* tile, const Device* attached, const 
         summary << QStringLiteral( "Saves to the log directory" );
     }
     tile->setSummary( summary );
+    updateDetails( tile );
+}
+
+void SidebarWidget::updateDetails( DeviceTile* tile )
+{
+    const auto serial = tile->serial();
+    if ( !sessions_->isSessionActive( serial ) ) {
+        // A stopped tile shows only the device; a new session counts anew.
+        samples_.remove( serial );
+        tile->setDetails( {} );
+        return;
+    }
+    tile->setDetails( sessionDetails( sessions_->counters( serial ), samples_.value( serial ).rate,
+                                      QDateTime::currentDateTime() ) );
+}
+
+void SidebarWidget::pollCounters()
+{
+    for ( auto* tile : std::as_const( tileBySerial_ ) ) {
+        const auto serial = tile->serial();
+        if ( sessions_->isSessionActive( serial ) ) {
+            const auto lines = sessions_->counters( serial ).lines;
+            auto it = samples_.find( serial );
+            if ( it == samples_.end() ) {
+                it = samples_.insert( serial, {} );
+            }
+            else {
+                it->rate = ratePerSecond( lines - it->lines, it->since.elapsed() );
+            }
+            it->lines = lines;
+            it->since.start();
+        }
+        updateDetails( tile );
+    }
 }
 
 // ── Acting on a tile ────────────────────────────────────────────────────

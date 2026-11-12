@@ -19,7 +19,8 @@
 
 /**
  * @file sidebarwidget_test.cpp
- * @brief BDD tests for the sidebar tab: one tile per device (issue #48).
+ * @brief BDD tests for the sidebar tab: one tile per device (issue #48), and
+ * a running tile's details (issue #49).
  *
  * The sidebar is driven through its widgets (the tiles' named children, the
  * Settings dialog) over a real Sessions and DeviceStore, with a FakeHost
@@ -43,6 +44,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QTimer>
 
 #include <memory>
 
@@ -137,6 +139,90 @@ SCENARIO( "a tile is titled by the model and the serial of its device", "[sideba
     THEN( "without a model, the serial is the title, whole" )
     {
         REQUIRE( deviceTitle( "emulator-5554", {} ) == "emulator-5554" );
+    }
+}
+
+SCENARIO( "a running tile's counts, sizes, rates and times are written to be read at a glance",
+          "[sidebarwidget]" )
+{
+    using logcat::formatCount;
+    using logcat::formatDuration;
+    using logcat::formatSize;
+    using logcat::ratePerSecond;
+
+    THEN( "a count has its thousands separated" )
+    {
+        REQUIRE( formatCount( 0 ) == "0" );
+        REQUIRE( formatCount( 999 ) == "999" );
+        REQUIRE( formatCount( 12345 ) == "12,345" );
+        REQUIRE( formatCount( 1234567 ) == "1,234,567" );
+    }
+
+    THEN( "a size is in bytes below a kilobyte, else in the largest unit, to a tenth" )
+    {
+        REQUIRE( formatSize( 0 ) == "0 B" );
+        REQUIRE( formatSize( 1023 ) == "1023 B" );
+        REQUIRE( formatSize( 1024 ) == "1.0 KB" );
+        REQUIRE( formatSize( 1536 ) == "1.5 KB" );
+        REQUIRE( formatSize( 1258291 ) == "1.2 MB" );
+        REQUIRE( formatSize( 5LL * 1024 * 1024 * 1024 ) == "5.0 GB" );
+        REQUIRE( formatSize( 3LL * 1024 * 1024 * 1024 * 1024 ) == "3.0 TB" );
+    }
+
+    THEN( "a duration is minutes and seconds, with hours once it has any" )
+    {
+        REQUIRE( formatDuration( 0 ) == "0:00" );
+        REQUIRE( formatDuration( 5 ) == "0:05" );
+        REQUIRE( formatDuration( 125 ) == "2:05" );
+        REQUIRE( formatDuration( 3723 ) == "1:02:03" );
+        REQUIRE( formatDuration( 100 * 3600 ) == "100:00:00" );
+        REQUIRE( formatDuration( -3 ) == "0:00" );
+    }
+
+    THEN( "a rate is how many per second over the time it was counted in" )
+    {
+        REQUIRE( ratePerSecond( 50, 1000 ) == 50 );
+        REQUIRE( ratePerSecond( 50, 500 ) == 100 );
+        REQUIRE( ratePerSecond( 3, 2000 ) == 1 );
+        REQUIRE( ratePerSecond( 0, 1000 ) == 0 );
+        REQUIRE( ratePerSecond( 50, 0 ) == 0 );
+        REQUIRE( ratePerSecond( -5, 1000 ) == 0 );
+    }
+}
+
+SCENARIO( "a running session's details say what it captured, how fast and for how long",
+          "[sidebarwidget]" )
+{
+    using logcat::sessionDetails;
+
+    GIVEN( "the counters of a session that has run an hour" )
+    {
+        logcat::SessionCounters counters;
+        counters.lines = 12345;
+        counters.bytes = 1258291;
+        counters.fileBytes = 524288;
+        counters.rotations = 2;
+        counters.startTime = QDateTime( QDate( 2026, 11, 12 ), QTime( 10, 0, 0 ) );
+        const auto now = counters.startTime.addSecs( 3723 );
+
+        THEN( "they show its time and rate, lines and bytes, file, rotations and next rotation" )
+        {
+            REQUIRE( sessionDetails( counters, 120, now )
+                     == QStringList{ "running 1:02:03 · 120 lines/s", "12,345 lines · 1.2 MB",
+                                     "file 512.0 KB · 2 rotations", "rotates on request" } );
+        }
+
+        THEN( "one rotation is one, not ones" )
+        {
+            counters.rotations = 1;
+            REQUIRE( sessionDetails( counters, 0, now )[ 2 ] == "file 512.0 KB · 1 rotation" );
+        }
+
+        THEN( "a session that rotated at a size would say at which" )
+        {
+            counters.nextRotationBytes = 10 * 1024 * 1024;
+            REQUIRE( sessionDetails( counters, 0, now )[ 3 ] == "rotates at 10.0 MB" );
+        }
     }
 }
 
@@ -565,6 +651,139 @@ SCENARIO( "the sidebar follows the sessions as they start and stop", "[sidebarwi
         }
 
         sessions.stopAll();
+    }
+}
+#endif
+
+#ifdef Q_OS_UNIX
+SCENARIO( "a running tile shows its session's details, live, and Rotate", "[sidebarwidget]" )
+{
+    const QString serial = "emulator-5554";
+
+    GIVEN( "a sidebar over an adb that prints two lines, then a hundred when told to" )
+    {
+        FakeHost host;
+        const auto trigger = host.tempRoot() + "/more";
+        logcat_test::installFakeAdb( host, "printf 'first\\nsecond\\n'\n"
+                                           "while [ ! -e '"
+                                               + trigger.toUtf8()
+                                               + "' ]; do sleep 0.02; done\n"
+                                                 "i=1; while [ $i -le 100 ]; do echo \"more $i\"; "
+                                                 "i=$((i+1)); done\n"
+                                                 "exec sleep 30\n" );
+        const auto more = [ &trigger ]() {
+            QFile file( trigger );
+            REQUIRE( file.open( QIODevice::WriteOnly ) );
+        };
+        DeviceStore store( host.configDir() + "/logcat.ini" );
+        Sessions sessions;
+        SidebarWidget sidebar( &store, &sessions );
+        REQUIRE( waitFor( [ &sessions ]() { return !sessions.devices().isEmpty(); } ) );
+        auto* tile = tileOf( sidebar, serial );
+        REQUIRE( tile );
+        auto* details = tile->findChild<QLabel*>( "details" );
+        auto* poll = sidebar.findChild<QTimer*>( "counterPoll" );
+        REQUIRE( poll );
+        REQUIRE( poll->interval() == SidebarWidget::kCounterPollMs );
+
+        THEN( "the stopped tile shows only the device's facts" )
+        {
+            REQUIRE_FALSE( details->isVisibleTo( tile ) );
+        }
+
+        WHEN( "Start is clicked on the tile" )
+        {
+            button( tile, "startStop" )->click();
+            REQUIRE( sessions.isSessionActive( serial ) );
+
+            THEN( "its details follow adb's lines by themselves" )
+            {
+                REQUIRE(
+                    waitFor( [ details ]() { return details->text().contains( "2 lines" ); } ) );
+                REQUIRE( details->isVisibleTo( tile ) );
+                const auto lines = details->text().split( '\n' );
+                INFO( details->text().toStdString() );
+                REQUIRE( lines.size() == 4 );
+                REQUIRE( lines[ 0 ].startsWith( "running 0:0" ) );
+                REQUIRE( lines[ 0 ].endsWith( " lines/s" ) );
+                REQUIRE( lines[ 1 ] == "2 lines · 13 B" ); // "first\nsecond\n"
+                REQUIRE( lines[ 2 ] == "file 13 B · 0 rotations" );
+                REQUIRE( lines[ 3 ] == "rotates on request" );
+            }
+
+            AND_WHEN( "a hundred lines more arrive between two polls" )
+            {
+                // Polled by the test alone, so that no poll comes between.
+                poll->stop();
+                REQUIRE( waitFor( [ & ]() { return sessions.counters( serial ).lines == 2; } ) );
+                sidebar.pollCounters();
+                more();
+                REQUIRE( waitFor( [ & ]() { return sessions.counters( serial ).lines == 102; } ) );
+                sidebar.pollCounters();
+
+                THEN( "the tile counts them, with their rate" )
+                {
+                    const auto lines = details->text().split( '\n' );
+                    INFO( details->text().toStdString() );
+                    REQUIRE( lines[ 1 ].startsWith( "102 lines · " ) );
+                    const auto rate
+                        = lines[ 0 ].section( " · ", 1 ).section( ' ', 0, 0 ).remove( ',' );
+                    REQUIRE( rate.toLongLong() > 0 );
+                }
+
+                AND_WHEN( "nothing more arrives until the next poll" )
+                {
+                    sidebar.pollCounters();
+
+                    THEN( "the rate is back to 0" )
+                    {
+                        REQUIRE( details->text().split( '\n' )[ 0 ].endsWith( " · 0 lines/s" ) );
+                    }
+                }
+            }
+
+            AND_WHEN( "Rotate is clicked on the tile, and more lines arrive" )
+            {
+                REQUIRE( waitFor( [ & ]() { return sessions.counters( serial ).lines == 2; } ) );
+                const auto firstFile = sessions.filePath( serial );
+                button( tile, "rotate" )->click();
+                more();
+                REQUIRE( waitFor( [ & ]() { return sessions.counters( serial ).lines == 102; } ) );
+                sidebar.pollCounters();
+
+                THEN( "they go to a new file, followed in a new tab, and the tile counts on" )
+                {
+                    const auto secondFile = sessions.filePath( serial );
+                    REQUIRE( secondFile != firstFile );
+                    REQUIRE( host.openedFiles == QStringList{ firstFile, secondFile } );
+                    REQUIRE( textOf( tile, "summary" ).contains( "Writes " + secondFile ) );
+
+                    QFile second( secondFile );
+                    REQUIRE( second.open( QIODevice::ReadOnly ) );
+                    const auto written = second.readAll();
+                    REQUIRE( written.startsWith( "more 1\n" ) );
+                    REQUIRE_FALSE( written.contains( "first" ) );
+
+                    const auto lines = details->text().split( '\n' );
+                    INFO( details->text().toStdString() );
+                    REQUIRE( lines[ 1 ].startsWith( "102 lines · " ) );
+                    REQUIRE( lines[ 2 ]
+                             == "file " + logcat::formatSize( written.size() ) + " · 1 rotation" );
+                }
+            }
+
+            AND_WHEN( "Stop is clicked on the tile" )
+            {
+                button( tile, "startStop" )->click();
+
+                THEN( "its details are gone with the session" )
+                {
+                    REQUIRE_FALSE( details->isVisibleTo( tile ) );
+                }
+            }
+
+            sessions.stopAll();
+        }
     }
 }
 #endif

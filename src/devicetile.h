@@ -26,7 +26,10 @@
  *   │ 3A1B2C3D4E5F · connected              │  summary: the device, its
  *   │ Saves to the log directory            │  state and where it saves
  *   │ ───────────────────────────────────── │  separator, with the details
- *   │ (the running session's details, #49)  │  (muted), hidden without any
+ *   │ running 1:02:03 · 120 lines/s         │  (muted), hidden without any:
+ *   │ 12,345 lines · 1.2 MB                 │  the running session's
+ *   │ file 512.0 KB · 2 rotations           │  counters
+ *   │ rotates on request                    │
  *   │              [↻ Rotate] [Save to…]    │  Rotate while it runs; Forget
  *   ╰───────────────────────────────────────╯  only while it is unplugged
  *

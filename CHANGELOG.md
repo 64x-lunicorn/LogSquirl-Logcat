@@ -27,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   log directory and the ADB path move into a dialog opened by Settings… in
   the tab; the device list, the inline form and the Active Sessions list
   are gone (#48).
+- **A running tile shows its session's details, with Rotate.** While a
+  device runs, its tile shows, updated every second, how long it runs and
+  its lines per second, the lines and bytes since Start, the size of the
+  current file and how often it was rotated, and when it rotates next: on
+  request, with ↻ Rotate on the tile, as logcat has no size limit. A
+  stopped tile shows only the device (#49).
 - **The icon matches the other LogSquirl plugins.** The log lines stay
   inside the frame the other plugin icons use (#45).
 - **Built against the plugin API of LogSquirl 26.12.** LogSquirl 26.11 and
