@@ -43,15 +43,17 @@
  * the device's own save path; Settings… opens the settings dialog
  * (settingsdialog.h): the log directory and the ADB path.
  *
- * The devices are rescanned every kScanIntervalMs, so that a device
- * plugged in or unplugged shows by itself; a scan or a session that starts,
- * stops or rotates updates the tiles at once.
+ * While the tab shows, the devices are rescanned every kScanIntervalMs, so
+ * that a device plugged in or unplugged shows by itself; they are scanned
+ * once right as it is shown, and not while it is hidden.  A scan or a
+ * session that starts, stops or rotates updates the tiles at once.
  *
  * A running tile shows its session's details (sessionDetails()): running
  * time and lines per second, lines and bytes, the current file's size and
  * the rotations so far, and when it rotates next — on request, as logcat
  * has no size limit.  A session's lines emit no signal, so the counters are
- * polled every kCounterPollMs (pollCounters()), the lines per second
+ * polled every kCounterPollMs (pollCounters()) while the tab shows, and
+ * right as it is shown, the lines per second
  * measured between two polls, as LogSquirl-NATS's tiles do.  A stopped tile
  * shows only the device.
  *
@@ -77,8 +79,10 @@
 #include <QWidget>
 
 class QDateTime;
+class QHideEvent;
 class QLabel;
 class QPushButton;
+class QShowEvent;
 class QTimer;
 class QVBoxLayout;
 
@@ -153,6 +157,14 @@ public:
      * kCounterPollMs; tests call it themselves.
      */
     void pollCounters();
+
+protected:
+    /// Scan the devices and poll the counters at once, then start the
+    /// timers that do it again.
+    void showEvent( QShowEvent* event ) override;
+
+    /// Stop the timers: a hidden tab scans and polls nothing.
+    void hideEvent( QHideEvent* event ) override;
 
 private:
     /// The lines of a running session at the poll before, to measure its

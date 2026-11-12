@@ -191,7 +191,9 @@ LOGSQUIRL_PLUGIN_EXPORT const LogSquirlPluginInfo* logsquirl_plugin_get_info( vo
  * @return 0 on success, non-zero on failure.
  *
  * Stores the host API and handle, creates the Sessions and a DeviceWidget
- * over them, and registers a sidebar tab over them.  A failure is logged and undone (shutdown()),
+ * over them, and the DeviceStore (the devices seen before and the log
+ * directory), and registers a sidebar tab over the store and the Sessions.
+ * A failure is logged and undone (shutdown()),
  * and init returns 1.
  */
 LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init_ex( const LogSquirlHostApi* api, void* handle,
@@ -236,9 +238,7 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init_ex( const LogSquirlHostApi* ap
 
         // The devices seen before, remembered in logcat.ini, and the log
         // directory; none without a config directory.
-        const auto configDir = logcat::AdbProcess::configDir();
-        logcat::g_state.store = new logcat::DeviceStore(
-            configDir.isEmpty() ? QString() : configDir + "/logcat.ini" );
+        logcat::g_state.store = new logcat::DeviceStore( logcat::AdbProcess::settingsFile() );
 
         // Register a sidebar tab with a tile per device
         logcat::g_state.sidebarWidget

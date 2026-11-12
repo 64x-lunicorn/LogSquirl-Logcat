@@ -237,6 +237,8 @@ SCENARIO( "the sidebar has a tile for each device, plugged in or seen before", "
         auto store = std::make_unique<DeviceStore>( settingsFile );
         auto sessions = std::make_unique<Sessions>();
         auto sidebar = std::make_unique<SidebarWidget>( store.get(), sessions.get() );
+        // The devices are rescanned only while the tab shows.
+        sidebar->show();
         REQUIRE( waitFor( [ &sessions ]() { return !sessions->isScanning(); } ) );
 
         THEN( "it has no tile, and says how to get one" )
@@ -314,6 +316,60 @@ SCENARIO( "the sidebar has a tile for each device, plugged in or seen before", "
                         REQUIRE( tileOf( *sidebar, "3A1B2C3D4E5F" ) == nullptr );
                         REQUIRE( DeviceStore( settingsFile ).list().isEmpty() );
                     }
+                }
+            }
+        }
+    }
+}
+#endif
+
+#ifdef Q_OS_UNIX
+SCENARIO( "the sidebar rescans the devices only while it shows", "[sidebarwidget]" )
+{
+    GIVEN( "a hidden sidebar whose first scan has ended, and an adb without devices" )
+    {
+        FakeHost host;
+        installAdbWithAttachedDevices( host );
+        DeviceStore store( host.configDir() + "/logcat.ini" );
+        Sessions sessions;
+        SidebarWidget sidebar( &store, &sessions );
+        REQUIRE( waitFor( [ &sessions ]() { return !sessions.isScanning(); } ) );
+        auto* scan = sidebar.findChild<QTimer*>( "deviceScan" );
+        auto* poll = sidebar.findChild<QTimer*>( "counterPoll" );
+        REQUIRE( scan );
+        REQUIRE( poll );
+
+        THEN( "neither the devices are rescanned nor the counters polled" )
+        {
+            REQUIRE_FALSE( scan->isActive() );
+            REQUIRE_FALSE( poll->isActive() );
+        }
+
+        WHEN( "a device is plugged in while it is hidden, and it is shown" )
+        {
+            attach( host, "emulator-5554  device model:sdk_gphone64\n" );
+            sidebar.show();
+
+            THEN( "the devices are scanned at once, and then every few seconds" )
+            {
+                REQUIRE( sessions.isScanning() );
+                REQUIRE( waitFor(
+                    [ &sidebar ]() { return tileOf( sidebar, "emulator-5554" ) != nullptr; },
+                    SidebarWidget::kScanIntervalMs / 2 ) );
+                REQUIRE( scan->isActive() );
+                REQUIRE( scan->interval() == SidebarWidget::kScanIntervalMs );
+                REQUIRE( poll->isActive() );
+            }
+
+            AND_WHEN( "it is hidden again" )
+            {
+                REQUIRE( waitFor( [ &sessions ]() { return !sessions.isScanning(); } ) );
+                sidebar.hide();
+
+                THEN( "the rescans and the polls stop" )
+                {
+                    REQUIRE_FALSE( scan->isActive() );
+                    REQUIRE_FALSE( poll->isActive() );
                 }
             }
         }
@@ -428,10 +484,12 @@ SCENARIO( "unauthorized and offline devices cannot be started", "[sidebarwidget]
             REQUIRE_FALSE( button( offline, "startStop" )->isEnabled() );
         }
 
-        WHEN( "Start is clicked anyway" )
+        WHEN( "Start is asked for anyway, as a tile that still shows them connected would" )
         {
-            button( unauthorized, "startStop" )->click();
-            button( offline, "startStop" )->click();
+            // The disabled button ignores a click: the tile's signal reaches
+            // the sidebar's own check.
+            Q_EMIT unauthorized->startClicked();
+            Q_EMIT offline->startClicked();
 
             THEN( "nothing starts" )
             {
@@ -678,6 +736,8 @@ SCENARIO( "a running tile shows its session's details, live, and Rotate", "[side
         DeviceStore store( host.configDir() + "/logcat.ini" );
         Sessions sessions;
         SidebarWidget sidebar( &store, &sessions );
+        // The counters are polled only while the tab shows.
+        sidebar.show();
         REQUIRE( waitFor( [ &sessions ]() { return !sessions.devices().isEmpty(); } ) );
         auto* tile = tileOf( sidebar, serial );
         REQUIRE( tile );

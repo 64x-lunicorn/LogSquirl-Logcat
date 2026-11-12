@@ -664,6 +664,123 @@ SCENARIO( "devices are discovered in the background", "[sessions]" )
 }
 #endif
 
+SCENARIO( "a device scan that keeps failing is logged once", "[sessions]" )
+{
+    // The sidebar rescans every few seconds: the same failure each time must
+    // not fill the log.
+    const auto scanTimes = []( Sessions& sessions, int times ) {
+        for ( int i = 0; i < times; ++i ) {
+            int changes = 0;
+            const auto connection = QObject::connect( &sessions, &Sessions::devicesChanged,
+                                                      [ &changes ]() { ++changes; } );
+            sessions.refreshDevices();
+            REQUIRE( waitFor(
+                [ &changes, &sessions ]() { return changes > 0 && !sessions.isScanning(); } ) );
+            QObject::disconnect( connection );
+        }
+    };
+
+    GIVEN( "an adb that cannot be executed" )
+    {
+        FakeHost host;
+        logcat_test::installBrokenAdb( host );
+        Sessions sessions;
+        REQUIRE( waitFor( [ &host ]() { return !host.logs.isEmpty(); } ) );
+
+        WHEN( "the devices are scanned again and again" )
+        {
+            scanTimes( sessions, 3 );
+
+            THEN( "the failure is logged once" )
+            {
+                REQUIRE( host.logs.filter( "could not be started" ).size() == 1 );
+            }
+        }
+    }
+
+#ifdef Q_OS_UNIX
+    GIVEN( "an adb whose device scan fails with the message in a file, if any" )
+    {
+        FakeHost host;
+        const auto messageFile = host.tempRoot() + "/message";
+        const auto setMessage = [ &messageFile ]( const QByteArray& message ) {
+            QFile file( messageFile );
+            REQUIRE( file.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+            file.write( message );
+        };
+        setMessage( "daemon not running" );
+        const auto quoted = "'" + messageFile.toUtf8() + "'";
+        logcat_test::installFakeAdb(
+            host, "exec sleep 30\n",
+            "if [ -s " + quoted + " ]; then cat " + quoted
+                + " >&2; exit 1; fi\n"
+                  "printf 'List of devices attached\\nemulator-5554\\tdevice\\n\\n'\n" );
+        Sessions sessions;
+        scanTimes( sessions, 1 );
+
+        WHEN( "the devices are scanned again and again" )
+        {
+            scanTimes( sessions, 3 );
+
+            THEN( "the failure is logged once" )
+            {
+                INFO( host.logs.join( '\n' ).toStdString() );
+                REQUIRE( host.logs.filter( "adb devices failed: daemon not running" ).size() == 1 );
+            }
+        }
+
+        WHEN( "the failure changes" )
+        {
+            setMessage( "protocol fault" );
+            scanTimes( sessions, 2 );
+
+            THEN( "the new failure is logged, once" )
+            {
+                REQUIRE( host.logs.filter( "adb devices failed" ).size() == 2 );
+                REQUIRE( host.logs.filter( "adb devices failed: protocol fault" ).size() == 1 );
+            }
+        }
+
+        WHEN( "a scan succeeds, and the next fails the same way" )
+        {
+            setMessage( {} );
+            scanTimes( sessions, 1 );
+            setMessage( "daemon not running" );
+            scanTimes( sessions, 2 );
+
+            THEN( "the recovery is logged, and the failure again, once" )
+            {
+                INFO( host.logs.join( '\n' ).toStdString() );
+                REQUIRE( host.logs.filter( "Discovered 1 device(s)" ).size() == 1 );
+                REQUIRE( host.logs.filter( "adb devices failed: daemon not running" ).size() == 2 );
+            }
+        }
+    }
+
+    GIVEN( "no adb anywhere" )
+    {
+        FakeHost host;
+        const NoAdbAnywhere noAdb;
+        logcat_test::useAdb( host, host.configDir() + "/missing-adb" );
+        if ( !logcat::AdbProcess::findAdb().isEmpty() ) {
+            WARN( "An adb is installed in a well-known location; skipped." );
+            return;
+        }
+        Sessions sessions;
+
+        WHEN( "the devices are scanned again and again" )
+        {
+            scanTimes( sessions, 3 );
+
+            THEN( "that adb is not found is logged once" )
+            {
+                REQUIRE( host.logs.filter( "adb not found" ).size() == 1 );
+            }
+        }
+    }
+#endif
+}
+
 #ifdef Q_OS_UNIX
 SCENARIO( "Sessions knows every attached device, its state and its model", "[sessions]" )
 {

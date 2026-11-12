@@ -91,17 +91,16 @@ Sessions::Sessions( QObject* parent )
 {
     scanProcess_ = new QProcess( this );
     connect( scanProcess_, &QProcess::finished, this, &Sessions::onScanFinished );
-    connect( scanProcess_, &QProcess::errorOccurred, this,
-             [ this ]( QProcess::ProcessError error ) {
-                 // No finished() follows a failed start
-                 if ( error == QProcess::FailedToStart ) {
-                     scanTimeout_->stop();
-                     hostLog( LOGSQUIRL_LOG_WARNING,
-                              "adb devices could not be started: " + scanProcess_->errorString() );
-                     setDevices( {} );
-                     onScanEnded();
-                 }
-             } );
+    connect(
+        scanProcess_, &QProcess::errorOccurred, this, [ this ]( QProcess::ProcessError error ) {
+            // No finished() follows a failed start
+            if ( error == QProcess::FailedToStart ) {
+                scanTimeout_->stop();
+                onScanFailed( "adb devices could not be started: " + scanProcess_->errorString() );
+                setDevices( {} );
+                onScanEnded();
+            }
+        } );
 
     // The first scan may need to start the ADB server, which can take
     // several seconds; give up after 10.
@@ -109,7 +108,7 @@ Sessions::Sessions( QObject* parent )
     scanTimeout_->setSingleShot( true );
     scanTimeout_->setInterval( 10000 );
     connect( scanTimeout_, &QTimer::timeout, this, [ this ]() {
-        hostLog( LOGSQUIRL_LOG_WARNING, "adb devices timed out." );
+        onScanFailed( "adb devices timed out." );
         scanProcess_->kill();
     } );
 
@@ -144,7 +143,7 @@ void Sessions::refreshDevices()
 
     const auto adb = AdbProcess::findAdb();
     if ( adb.isEmpty() ) {
-        hostLog( LOGSQUIRL_LOG_WARNING, "adb not found — cannot discover devices." );
+        onScanFailed( "adb not found — cannot discover devices." );
         setDevices( {} );
         // A scan that ended just before may have left a view showing "Scanning…"
         Q_EMIT scanningChanged();
@@ -183,14 +182,14 @@ void Sessions::onScanFinished( int exitCode, QProcess::ExitStatus exitStatus )
         // Killed after the timeout, which has been logged already
     }
     else if ( exitCode != 0 ) {
-        hostLog( LOGSQUIRL_LOG_WARNING,
-                 "adb devices failed: "
-                     + QString::fromUtf8( scanProcess_->readAllStandardError() ).trimmed() );
+        onScanFailed( "adb devices failed: "
+                      + QString::fromUtf8( scanProcess_->readAllStandardError() ).trimmed() );
     }
     else {
         found = AdbProcess::parseDevices( scanProcess_->readAllStandardOutput() );
-        // The sidebar rescans every few seconds: only news is logged.
-        if ( !scanned_ || found != attached_ ) {
+        // The sidebar rescans every few seconds: only news is logged, and
+        // the devices after a failure.
+        if ( !scanned_ || found != attached_ || !scanError_.isEmpty() ) {
             const auto ready = std::count_if( found.cbegin(), found.cend(),
                                               []( const Device& d ) { return d.isReady(); } );
             hostLog(
@@ -198,10 +197,20 @@ void Sessions::onScanFinished( int exitCode, QProcess::ExitStatus exitStatus )
                 QString( "Discovered %1 device(s), %2 ready." ).arg( found.size() ).arg( ready ) );
         }
         scanned_ = true;
+        scanError_.clear();
     }
 
     setDevices( found );
     onScanEnded();
+}
+
+void Sessions::onScanFailed( const QString& message )
+{
+    // The sidebar rescans every few seconds: the same failure is logged once.
+    if ( message != scanError_ ) {
+        hostLog( LOGSQUIRL_LOG_WARNING, message );
+        scanError_ = message;
+    }
 }
 
 void Sessions::onScanEnded()

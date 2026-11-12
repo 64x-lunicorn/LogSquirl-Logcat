@@ -428,9 +428,11 @@ stands for a device, not for a saved configuration:
 - **Which devices.** Every device `adb devices -l` lists, in any state
   (`Sessions::attachedDevices()`, parsed by `AdbProcess::parseDevices()`),
   and every device seen before (`DeviceStore`, the array `devices` in
-  `logcat.ini`), first seen first. The tab rescans every
+  `logcat.ini`), first seen first. While it is shown, the tab rescans every
   `SidebarWidget::kScanIntervalMs` (3 s), so a device plugged in or unplugged
-  shows by itself; the scan logs the devices only when they changed.
+  shows by itself; it scans once right as it is shown (`showEvent()`) and not
+  while it is hidden (`hideEvent()`). The scan logs the devices only when they
+  changed, and a failure once, until it changes or a scan succeeds.
 - **What a tile says.** Its title is `<model> · <serial>`
   (`deviceTitle()`: `Pixel 8 · 3A1B…`, a serial longer than 8 characters cut
   after 4, the summary showing it whole). Its dot and summary say whether the
@@ -458,7 +460,7 @@ stands for a device, not for a saved configuration:
 
   A session's lines emit no signal, so the tab polls the counters every
   `SidebarWidget::kCounterPollMs` (1 s, the timer `counterPoll`,
-  `pollCounters()`); the lines per second are those between two polls (0 at a
+  `pollCounters()`) while it is shown, and right as it is shown; the lines per second are those between two polls (0 at a
   session's first poll), as in LogSquirl-NATS's tiles. Logcat has no size
   limit, so the next rotation is "on request" (**↻ Rotate**); were
   `SessionCounters::nextRotationBytes` set, it would say at which size. Sizes

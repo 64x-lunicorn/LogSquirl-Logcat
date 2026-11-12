@@ -234,17 +234,17 @@ SidebarWidget::SidebarWidget( DeviceStore* store, Sessions* sessions, QWidget* p
     connect( sessions_, &Sessions::sessionChanged, this, &SidebarWidget::reload );
     connect( store_, &DeviceStore::changed, this, &SidebarWidget::reload );
 
-    // A device plugged in or unplugged shows by itself.
+    // A device plugged in or unplugged shows by itself, while the tab shows
+    // (showEvent()).
     scanTimer_->setObjectName( "deviceScan" );
     scanTimer_->setInterval( kScanIntervalMs );
     connect( scanTimer_, &QTimer::timeout, sessions_, &Sessions::refreshDevices );
-    scanTimer_->start();
 
-    // A running session's lines emit no signal: its tile polls them.
+    // A running session's lines emit no signal: its tile polls them, while
+    // the tab shows.
     pollTimer_->setObjectName( "counterPoll" );
     pollTimer_->setInterval( kCounterPollMs );
     connect( pollTimer_, &QTimer::timeout, this, &SidebarWidget::pollCounters );
-    pollTimer_->start();
 
     // Sessions has started the first device scan; devicesChanged() fills
     // in the result.
@@ -252,6 +252,23 @@ SidebarWidget::SidebarWidget( DeviceStore* store, Sessions* sessions, QWidget* p
 }
 
 // ── Showing the devices ─────────────────────────────────────────────────
+
+void SidebarWidget::showEvent( QShowEvent* event )
+{
+    QWidget::showEvent( event );
+    // The devices and the counters may have changed while it was hidden.
+    sessions_->refreshDevices();
+    pollCounters();
+    scanTimer_->start();
+    pollTimer_->start();
+}
+
+void SidebarWidget::hideEvent( QHideEvent* event )
+{
+    QWidget::hideEvent( event );
+    scanTimer_->stop();
+    pollTimer_->stop();
+}
 
 void SidebarWidget::onDevicesChanged()
 {

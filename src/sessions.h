@@ -202,6 +202,10 @@ private:
     /** Store the result of a scan and announce it. */
     void setDevices( const QList<Device>& devices );
 
+    /** Log the failure of a scan, unless it is the one logged last, with no
+     *  successful scan since. */
+    void onScanFailed( const QString& message );
+
     /** Run the rescan requested during the scan that has just ended. */
     void onScanEnded();
 
@@ -223,6 +227,7 @@ private:
     QStringList devices_;             ///< The ready devices of attached_.
     bool scanned_ = false;            ///< A scan has finished: its devices were logged.
     bool rescanPending_ = false;      ///< Scan again when the running scan ends.
+    QString scanError_;               ///< The failure logged last; empty after a successful scan.
 
     // ── Running sessions (serial → AdbProcess*) ─────────────────────
     QMap<QString, AdbProcess*> sessions_;

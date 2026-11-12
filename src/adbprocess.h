@@ -213,6 +213,10 @@ public:
      */
     static QString configDir();
 
+    /// The plugin's settings file, logcat.ini in configDir() (the ADB path,
+    /// and devicestore.h); empty without a config directory.
+    static QString settingsFile();
+
     /**
      * The path a user typed, made absolute: a leading `~` is the home
      * directory, and the path is cleaned.  Empty for a path that is still

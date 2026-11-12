@@ -149,23 +149,29 @@ QString AdbProcess::configDir()
     return {};
 }
 
-QString AdbProcess::adbPathOverride()
+QString AdbProcess::settingsFile()
 {
     const auto cfgDir = configDir();
-    if ( cfgDir.isEmpty() ) {
+    return cfgDir.isEmpty() ? QString() : cfgDir + "/logcat.ini";
+}
+
+QString AdbProcess::adbPathOverride()
+{
+    const auto file = settingsFile();
+    if ( file.isEmpty() ) {
         return {};
     }
-    const QSettings settings( cfgDir + "/logcat.ini", QSettings::IniFormat );
+    const QSettings settings( file, QSettings::IniFormat );
     return settings.value( "adb/path" ).toString();
 }
 
 bool AdbProcess::setAdbPathOverride( const QString& path )
 {
-    const auto cfgDir = configDir();
-    if ( cfgDir.isEmpty() ) {
+    const auto file = settingsFile();
+    if ( file.isEmpty() ) {
         return false;
     }
-    QSettings settings( cfgDir + "/logcat.ini", QSettings::IniFormat );
+    QSettings settings( file, QSettings::IniFormat );
     settings.setValue( "adb/path", path );
     return true;
 }

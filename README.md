@@ -96,7 +96,7 @@ After installing, restart LogSquirl or re-scan via *Plugins → Manage Plugins�
 
    - **Plug in a device** (USB debugging on) and its tile appears by
      itself, titled by model and serial, e.g. `Pixel 8 · 3A1B…`. The devices
-     are rescanned every 3 seconds.
+     are rescanned every 3 seconds while the tab is shown.
    - The tile's dot and summary say whether the device is **connected**,
      **running**, **unauthorized** (allow USB debugging on the device),
      **offline** or **disconnected**. Only a connected device can be started.
