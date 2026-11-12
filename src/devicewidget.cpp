@@ -35,7 +35,6 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QInputDialog>
-#include <QSettings>
 #include <QVBoxLayout>
 
 namespace logcat {
@@ -271,13 +270,11 @@ void DeviceWidget::updateUiState()
 
 void DeviceWidget::configureAdbPath( QWidget* parent )
 {
-    const auto configDir = AdbProcess::configDir();
-    if ( configDir.isEmpty() ) {
+    if ( AdbProcess::configDir().isEmpty() ) {
         hostLog( LOGSQUIRL_LOG_WARNING, "The ADB path cannot be configured: no config directory." );
         return;
     }
-    QSettings settings( configDir + "/logcat.ini", QSettings::IniFormat );
-    const auto currentPath = settings.value( "adb/path", "" ).toString();
+    const auto currentPath = AdbProcess::adbPathOverride();
     const auto detected = AdbProcess::findAdb();
 
     const auto prompt = QString( "ADB executable path:\n\n"
@@ -291,7 +288,7 @@ void DeviceWidget::configureAdbPath( QWidget* parent )
                                                 QLineEdit::Normal, currentPath, &ok );
 
     if ( ok ) {
-        settings.setValue( "adb/path", newPath );
+        AdbProcess::setAdbPathOverride( newPath );
         hostLog( LOGSQUIRL_LOG_INFO, newPath.isEmpty()
                                          ? "ADB path override cleared — using auto-detection."
                                          : "ADB path set to: " + newPath );

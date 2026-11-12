@@ -27,9 +27,11 @@
 
 #include <catch2/catch.hpp>
 
+#include <algorithm>
 #include <cstring>
 #include <memory>
 
+#include "devicetile.h"
 #include "devicewidget.h"
 #include "fakeadb.h"
 #include "plugin.h"
@@ -37,7 +39,6 @@
 #include "sidebarwidget.h"
 
 #include <QApplication>
-#include <QComboBox>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -135,9 +136,11 @@ SCENARIO( "a new ADB path from Plugins → Configure is used right away", "[plug
                                == QStringList{ "emulator-5556" };
                     },
                     3000 ) );
-                auto* sidebarCombo = logcat::g_state.sidebarWidget->findChild<QComboBox*>();
-                REQUIRE( sidebarCombo );
-                REQUIRE( sidebarCombo->findData( "emulator-5556" ) >= 0 );
+                const auto tiles
+                    = logcat::g_state.sidebarWidget->findChildren<logcat::DeviceTile*>();
+                REQUIRE( std::any_of( tiles.cbegin(), tiles.cend(), []( const auto* tile ) {
+                    return tile->serial() == "emulator-5556";
+                } ) );
             }
         }
 
@@ -357,6 +360,42 @@ SCENARIO( "temporary directories of LogSquirl processes that ended are swept", "
     }
 #endif
 }
+
+#ifdef Q_OS_UNIX
+SCENARIO( "the sidebar remembers the devices it saw when LogSquirl restarts", "[plugin]" )
+{
+    GIVEN( "an initialised plugin whose adb lists a device" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb(
+            host, "exec sleep 30\n",
+            "printf 'List of devices attached\\n3A1B2C3D4E5F  device model:Pixel_8\\n\\n'\n" );
+        REQUIRE( logsquirl_plugin_init( host.api(), &host ) == 0 );
+        REQUIRE( waitFor( []() { return !logcat::g_state.sessions->devices().isEmpty(); } ) );
+
+        WHEN( "LogSquirl quits, the device is unplugged, and LogSquirl starts again" )
+        {
+            QMetaObject::invokeMethod( QCoreApplication::instance(), "aboutToQuit" );
+            logsquirl_plugin_shutdown();
+            logcat_test::installFakeAdb( host, "exec sleep 30\n",
+                                         "printf 'List of devices attached\\n\\n'\n" );
+            REQUIRE( logsquirl_plugin_init( host.api(), &host ) == 0 );
+            REQUIRE( waitFor( []() { return !logcat::g_state.sessions->isScanning(); } ) );
+
+            THEN( "the sidebar has its tile, disconnected" )
+            {
+                const auto tiles
+                    = logcat::g_state.sidebarWidget->findChildren<logcat::DeviceTile*>();
+                REQUIRE( tiles.size() == 1 );
+                REQUIRE( tiles.first()->serial() == "3A1B2C3D4E5F" );
+                REQUIRE( tiles.first()->state() == logcat::TileState::Disconnected );
+            }
+        }
+
+        logsquirl_plugin_shutdown();
+    }
+}
+#endif
 
 SCENARIO( "the plugin registers its sidebar tab for its lifetime", "[plugin]" )
 {

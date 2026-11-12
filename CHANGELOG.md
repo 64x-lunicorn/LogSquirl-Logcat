@@ -17,6 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   archive (#29).
 
 ### Changed
+- **One tile per device in the sidebar.** The Logcat tab shows a tile for
+  each device: a device you plug in gets its tile by itself, titled by
+  model and serial (`Pixel 8 · 3A1B…`), and says whether it is connected,
+  running, unauthorized or offline; only a connected device can be started.
+  Start, Stop and Rotate are on the tile, and Save to… gives the device a
+  save path of its own. A device seen before keeps its tile while it is
+  unplugged, greyed out, also after a restart, until you Forget it. The
+  log directory and the ADB path move into a dialog opened by Settings… in
+  the tab; the device list, the inline form and the Active Sessions list
+  are gone (#48).
 - **The icon matches the other LogSquirl plugins.** The log lines stay
   inside the frame the other plugin icons use (#45).
 - **Built against the plugin API of LogSquirl 26.12.** LogSquirl 26.11 and

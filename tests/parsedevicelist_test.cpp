@@ -164,4 +164,120 @@ SCENARIO( "parseDeviceList extracts serials from adb output", "[parsedevicelist]
             }
         }
     }
+
+    GIVEN( "the long format of `adb devices -l`, columns separated by spaces" )
+    {
+        const QByteArray output
+            = "List of devices attached\n"
+              "3A1B2C3D4E5F           device usb:1-1 product:shiba model:Pixel_8 device:shiba "
+              "transport_id:1\n"
+              "NOAUTH456              unauthorized usb:1-2 transport_id:3\n"
+              "\n";
+
+        WHEN( "parsing the output" )
+        {
+            const auto devices = AdbProcess::parseDeviceList( output );
+
+            THEN( "only the device in state 'device' is listed" )
+            {
+                REQUIRE( devices == QStringList{ "3A1B2C3D4E5F" } );
+            }
+        }
+    }
+}
+
+SCENARIO( "parseDevices reads every device's serial, state and model", "[parsedevicelist]" )
+{
+    GIVEN( "the output of `adb devices -l` with devices in every state" )
+    {
+        const QByteArray output
+            = "List of devices attached\n"
+              "3A1B2C3D4E5F           device usb:1-1 product:shiba model:Pixel_8 device:shiba "
+              "transport_id:1\n"
+              "emulator-5554          device product:sdk_gphone64 model:sdk_gphone64_arm64 "
+              "device:emu64a transport_id:2\n"
+              "NOAUTH456              unauthorized usb:1-2 transport_id:3\n"
+              "OFFLINE123             offline transport_id:4\n"
+              "0123456789ABCDEF       no permissions (missing udev rules? user is in the plugdev "
+              "group); see [http://developer.android.com/tools/device.html] usb:3-1\n"
+              "\n";
+
+        WHEN( "parsing the output" )
+        {
+            const auto devices = AdbProcess::parseDevices( output );
+
+            THEN( "every device is listed, in order, with its state" )
+            {
+                REQUIRE( devices.size() == 5 );
+                REQUIRE( devices[ 0 ].serial == "3A1B2C3D4E5F" );
+                REQUIRE( devices[ 0 ].state == "device" );
+                REQUIRE( devices[ 1 ].serial == "emulator-5554" );
+                REQUIRE( devices[ 2 ].serial == "NOAUTH456" );
+                REQUIRE( devices[ 2 ].state == "unauthorized" );
+                REQUIRE( devices[ 3 ].state == "offline" );
+                REQUIRE( devices[ 4 ].serial == "0123456789ABCDEF" );
+                REQUIRE( devices[ 4 ].state == "no permissions" );
+            }
+
+            THEN( "a model is read with spaces for adb's underscores" )
+            {
+                REQUIRE( devices[ 0 ].model == "Pixel 8" );
+                REQUIRE( devices[ 1 ].model == "sdk gphone64 arm64" );
+            }
+
+            THEN( "a device adb names no model has none" )
+            {
+                REQUIRE( devices[ 2 ].model.isEmpty() );
+                REQUIRE( devices[ 3 ].model.isEmpty() );
+            }
+
+            THEN( "only a device in state 'device' is ready for logcat" )
+            {
+                REQUIRE( devices[ 0 ].isReady() );
+                REQUIRE( devices[ 1 ].isReady() );
+                REQUIRE_FALSE( devices[ 2 ].isReady() );
+                REQUIRE_FALSE( devices[ 3 ].isReady() );
+                REQUIRE_FALSE( devices[ 4 ].isReady() );
+            }
+        }
+    }
+
+    GIVEN( "the short format of `adb devices`, columns separated by a tab" )
+    {
+        const QByteArray output = "List of devices attached\r\n"
+                                  "emulator-5554\tdevice\r\n"
+                                  "\r\n";
+
+        WHEN( "parsing the output" )
+        {
+            const auto devices = AdbProcess::parseDevices( output );
+
+            THEN( "the device is listed without a model" )
+            {
+                REQUIRE( devices.size() == 1 );
+                REQUIRE( devices[ 0 ].serial == "emulator-5554" );
+                REQUIRE( devices[ 0 ].state == "device" );
+                REQUIRE( devices[ 0 ].model.isEmpty() );
+            }
+        }
+    }
+
+    GIVEN( "lines adb writes besides the list, e.g. when it starts its server" )
+    {
+        const QByteArray output = "* daemon not running; starting now at tcp:5037\n"
+                                  "* daemon started successfully\n"
+                                  "List of devices attached\n"
+                                  "emulator-5554\tdevice\n";
+
+        WHEN( "parsing the output" )
+        {
+            const auto devices = AdbProcess::parseDevices( output );
+
+            THEN( "only the device is listed" )
+            {
+                REQUIRE( devices.size() == 1 );
+                REQUIRE( devices[ 0 ].serial == "emulator-5554" );
+            }
+        }
+    }
 }

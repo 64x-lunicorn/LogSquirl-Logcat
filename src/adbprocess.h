@@ -66,6 +66,32 @@ struct SessionCounters {
     QDateTime startTime; ///< When start() launched adb; null before.
 };
 
+/// A device as `adb devices -l` lists it (AdbProcess::parseDevices()).
+struct Device {
+    QString serial; ///< E.g. "emulator-5554", "3A1B2C3D4E5F" or "192.168.1.5:5555".
+    /// As adb says it: "device" (connected, and USB debugging allowed),
+    /// "unauthorized", "offline", "no permissions", "recovery", …
+    QString state;
+    /// E.g. "Pixel 8"; empty when adb names none (an unauthorized or offline
+    /// device, or the short format of `adb devices`).
+    QString model;
+
+    /// Whether logcat can run on it: its state is "device".
+    bool isReady() const
+    {
+        return state == QLatin1String( "device" );
+    }
+
+    bool operator==( const Device& other ) const
+    {
+        return serial == other.serial && state == other.state && model == other.model;
+    }
+    bool operator!=( const Device& other ) const
+    {
+        return !( *this == other );
+    }
+};
+
 /**
  * Manages a single `adb logcat` process for one device.
  *
@@ -113,6 +139,14 @@ public:
      */
     static QString findAdb();
 
+    /// The ADB path the user set (logcat.ini → adb/path); empty for
+    /// auto-detection, and without a config directory.
+    static QString adbPathOverride();
+
+    /// Save @p path as the ADB path; empty for auto-detection.  False if
+    /// there is no config directory to save it in.
+    static bool setAdbPathOverride( const QString& path );
+
     /**
      * Parse the raw output of `adb devices` into a list of device serials.
      *
@@ -123,10 +157,22 @@ public:
      * Extracted as a static helper so unit tests can exercise the parsing
      * logic without running a real ADB process.
      *
-     * @param output  Raw stdout bytes from `adb devices`.
+     * @param output  Raw stdout bytes from `adb devices` or `adb devices -l`.
      * @return List of serials with status "device".
      */
     static QStringList parseDeviceList( const QByteArray& output );
+
+    /**
+     * Parse the raw output of `adb devices -l` (or of `adb devices`) into
+     * every device it lists, in any state, in its order.  The columns may
+     * be separated by a tab (short format) or by spaces (long format); a
+     * model is read from the long format's `model:` field, with spaces for
+     * the underscores adb writes.
+     *
+     * @param output  Raw stdout bytes from `adb devices -l`.
+     * @return The devices, in the order adb lists them.
+     */
+    static QList<Device> parseDevices( const QByteArray& output );
 
     /**
      * Remove every complete line from the front of @p buffer and return

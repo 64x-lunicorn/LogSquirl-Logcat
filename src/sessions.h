@@ -21,7 +21,7 @@
  * @file sessions.h
  * @brief The devices adb lists, and the logcat session of each.
  *
- * Sessions scans for devices with `adb devices` in the background, starts
+ * Sessions scans for devices with `adb devices -l` in the background, starts
  * an AdbProcess for a device (adbprocess.h), opens its file in a followed
  * tab, opens the next file in a new tab when the session is rotated, and
  * says through its signals when a session starts, stops or changes.  A
@@ -82,10 +82,18 @@ public:
 
     // ── Devices ──────────────────────────────────────────────────────
 
-    /// Serials of the devices found by the most recent scan.
+    /// Serials of the devices found by the most recent scan that can run
+    /// logcat (state "device").
     const QStringList& devices() const
     {
         return devices_;
+    }
+
+    /// Every device found by the most recent scan, in any state (also
+    /// unauthorized or offline), with its model, in adb's order.
+    const QList<Device>& attachedDevices() const
+    {
+        return attached_;
     }
 
     /// Whether a device scan runs.
@@ -192,7 +200,7 @@ private:
     void onSessionError( const QString& serial, const QString& message );
 
     /** Store the result of a scan and announce it. */
-    void setDevices( const QStringList& devices );
+    void setDevices( const QList<Device>& devices );
 
     /** Run the rescan requested during the scan that has just ended. */
     void onScanEnded();
@@ -211,7 +219,9 @@ private:
     // ── Device discovery ─────────────────────────────────────────────
     QProcess* scanProcess_ = nullptr; ///< Runs `adb devices`.
     QTimer* scanTimeout_ = nullptr;   ///< Gives up on a hanging scan.
-    QStringList devices_;             ///< Result of the last scan.
+    QList<Device> attached_;          ///< Result of the last scan.
+    QStringList devices_;             ///< The ready devices of attached_.
+    bool scanned_ = false;            ///< A scan has finished: its devices were logged.
     bool rescanPending_ = false;      ///< Scan again when the running scan ends.
 
     // ── Running sessions (serial → AdbProcess*) ─────────────────────

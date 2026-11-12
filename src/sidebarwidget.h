@@ -19,100 +19,114 @@
 
 /**
  * @file sidebarwidget.h
- * @brief Sidebar panel for ADB logcat session management.
+ * @brief The plugin's tab "Logcat" in LogSquirl's sidebar: one tile per device.
  *
- * This widget is registered as a tab in the LogSquirl sidebar via the
- * host API's register_sidebar_tab().  It provides:
+ *   [Settings…]                    [■ Stop all]
+ *   ┌ tile: Pixel 8 · 3A1B… ────────────────┐   connected or running
+ *   └───────────────────────────────────────┘
+ *   ┌ tile: Galaxy S23 · R5CR… ─────────────┐   unplugged: greyed, Forget
+ *   └───────────────────────────────────────┘
  *
- *   - Device combo box with refresh button
- *   - Start / Stop capture buttons
- *   - Active sessions list showing device serial, line count, and
- *     per-session Rotate / Stop buttons
- *   - A "Stop All" button
+ * One tile (devicetile.h) per device: each device adb lists, in any state,
+ * and each device seen before (devicestore.h), which stays while it is
+ * unplugged — greyed out, Start disabled, with Forget — until it is
+ * forgotten; also a device that runs a session adb no longer lists.
+ * Devices seen before come first, in the order they were first seen.  A
+ * tile is titled by the device's model and serial (deviceTitle()) and says
+ * whether the device is connected, running, unauthorized, offline or
+ * disconnected, and where it saves.
  *
- * The panel is a view of the plugin's Sessions (sessions.h), like the
- * dialog (devicewidget.h) that remains available via the Plugins menu:
- * both show the same devices and sessions, and Sessions' signals keep
- * them in sync.
+ * Start runs logcat for the device (sessions.h), followed in a new tab,
+ * writing to the device's own save path or else to a new file in the log
+ * directory; Stop ends it, its tab keeping the file; ↻ Rotate goes on in a
+ * new file and tab.  Several devices run at once.  Save to… on a tile sets
+ * the device's own save path; Settings… opens the settings dialog
+ * (settingsdialog.h): the log directory and the ADB path.
+ *
+ * The devices are rescanned every kScanIntervalMs, so that a device
+ * plugged in or unplugged shows by itself; a scan or a session that starts,
+ * stops or rotates updates the tiles at once.
+ *
+ * Children named for tests: "settings", "stopAll", "empty" (the hint shown
+ * without a tile), "deviceScan" (the rescan timer), the tiles ("tile"), and
+ * while it is open the dialog of a tile's Save to… ("savePathDialog", with
+ * the line edit "savePath").
+ *
+ * OWNERSHIP
+ * ─────────
+ * Created by logsquirl_plugin_init() and registered with
+ * register_sidebar_tab; the host parents it.  logsquirl_plugin_shutdown()
+ * unregisters and deletes it, before the sessions and the store it shows.
  */
 
 #pragma once
 
-#include <QComboBox>
-#include <QLabel>
-#include <QLineEdit>
-#include <QListWidget>
-#include <QPushButton>
+#include <QHash>
+#include <QString>
 #include <QWidget>
+
+class QLabel;
+class QPushButton;
+class QTimer;
+class QVBoxLayout;
 
 namespace logcat {
 
+class DeviceStore;
+class DeviceTile;
 class Sessions;
+struct Device;
+struct KnownDevice;
 
 /**
- * Sidebar panel widget for logcat session control.
- *
- * Embeds device selection and an active-sessions list.  All actual
- * session logic is in Sessions; the panel refills itself on its signals.
+ * The title of a device's tile: "<model> · <serial>", e.g.
+ * "Pixel 8 · 3A1B…".  A serial longer than 8 characters is cut after its
+ * first 4 (the summary shows it whole); without a model, the serial alone,
+ * whole.
  */
+QString deviceTitle( const QString& serial, const QString& model );
+
 class SidebarWidget : public QWidget {
     Q_OBJECT
 
 public:
-    /**
-     * Construct the sidebar panel.
-     *
-     * @param sessions  The devices and sessions the panel shows.  Must
-     *                  outlive this widget.
-     * @param parent    QWidget parent.
-     */
-    explicit SidebarWidget( Sessions* sessions, QWidget* parent = nullptr );
+    /// How often the devices are rescanned, in milliseconds.
+    static constexpr int kScanIntervalMs = 3000;
 
-private Q_SLOTS:
-    /** Refill the device combo box and the sessions list. */
-    void updateDeviceList();
+    /// Shows the devices of @p store and @p sessions, and the sessions of
+    /// @p sessions, which must both outlive it.
+    SidebarWidget( DeviceStore* store, Sessions* sessions, QWidget* parent = nullptr );
 
-    /** Start logcat for the currently selected device. */
-    void startCapture();
-
-    /** Stop logcat for the currently selected device. */
-    void stopSelectedCapture();
-
-    /** Stop all active sessions. */
-    void stopAllCaptures();
+    /// Show the devices and sessions as they are now.
+    void reload();
 
 private:
-    /** Build or rebuild the sessions list widget contents. */
-    void rebuildSessionList();
+    /// Start logcat for @p serial, if it is ready.
+    void start( const QString& serial );
 
-    /** Return the serial of the currently selected combo box item. */
-    QString currentSerial() const;
+    /// Open the dialog that sets the save path of @p serial.
+    void editSavePath( const QString& serial );
 
-    /** Update button enabled/disabled states. */
-    void updateUiState();
+    /// Open the settings dialog.
+    void openSettings();
 
-    /** Generate a save path for a new session based on log directory and device serial. */
-    QString generateSavePath( const QString& serial ) const;
+    /// Remember the attached devices, and show them.
+    void onDevicesChanged();
 
-    /** Load the persisted log directory from plugin config. */
-    void loadLogDir();
+    /// The tile of @p serial, created (and connected) if it has none.
+    DeviceTile* tileFor( const QString& serial );
 
-    /** Persist the log directory to plugin config. */
-    void saveLogDir();
+    /// Show on @p tile what its device is and does; @p attached is how adb
+    /// lists it (nullptr: not), @p known how the store remembers it.
+    void updateTile( DeviceTile* tile, const Device* attached, const KnownDevice* known );
 
-    // ── Shared state ─────────────────────────────────────────────────
-    Sessions* sessions_ = nullptr;
-
-    // ── UI elements ──────────────────────────────────────────────────
-    QComboBox* deviceCombo_ = nullptr;
-    QPushButton* refreshButton_ = nullptr;
-    QPushButton* startButton_ = nullptr;
-    QPushButton* stopButton_ = nullptr;
-    QPushButton* stopAllButton_ = nullptr;
-    QLineEdit* logDirEdit_ = nullptr;
-    QPushButton* logDirBrowseButton_ = nullptr;
-    QListWidget* sessionList_ = nullptr;
-    QLabel* statusLabel_ = nullptr;
+    DeviceStore* store_;
+    Sessions* sessions_;
+    QPushButton* stopAll_;
+    QLabel* empty_;
+    QVBoxLayout* tiles_;
+    QTimer* scanTimer_;
+    QHash<QString, DeviceTile*> tileBySerial_;
 };
 
 } // namespace logcat

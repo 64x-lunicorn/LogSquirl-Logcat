@@ -29,8 +29,9 @@
  *      - System PATH
  *
  *   2. Sessions (sessions.h) runs `adb devices` in the background, and
- *      parseDeviceList() extracts the serials of devices in the "device"
- *      state from its tabular output.
+ *      parseDevices() reads every device of its tabular output (`adb
+ *      devices -l`: serial, state, model); parseDeviceList() keeps the
+ *      serials of those in the "device" state.
  *
  *   3. start() launches `adb -s <serial> logcat` as a child process.
  *      Stdout is read incrementally (readyReadStandardOutput signal) and
@@ -148,16 +149,33 @@ QString AdbProcess::configDir()
     return {};
 }
 
+QString AdbProcess::adbPathOverride()
+{
+    const auto cfgDir = configDir();
+    if ( cfgDir.isEmpty() ) {
+        return {};
+    }
+    const QSettings settings( cfgDir + "/logcat.ini", QSettings::IniFormat );
+    return settings.value( "adb/path" ).toString();
+}
+
+bool AdbProcess::setAdbPathOverride( const QString& path )
+{
+    const auto cfgDir = configDir();
+    if ( cfgDir.isEmpty() ) {
+        return false;
+    }
+    QSettings settings( cfgDir + "/logcat.ini", QSettings::IniFormat );
+    settings.setValue( "adb/path", path );
+    return true;
+}
+
 QString AdbProcess::findAdb()
 {
     // 1. Check user override from plugin config
-    const auto cfgDir = configDir();
-    if ( !cfgDir.isEmpty() ) {
-        QSettings settings( cfgDir + "/logcat.ini", QSettings::IniFormat );
-        const auto override = settings.value( "adb/path" ).toString();
-        if ( !override.isEmpty() && QFileInfo::exists( override ) ) {
-            return override;
-        }
+    if ( const auto override = adbPathOverride();
+         !override.isEmpty() && QFileInfo::exists( override ) ) {
+        return override;
     }
 
     const auto env = QProcessEnvironment::systemEnvironment();
@@ -216,24 +234,53 @@ QString AdbProcess::findAdb()
 
 QStringList AdbProcess::parseDeviceList( const QByteArray& output )
 {
-    // Parse output.  Format:
+    QStringList serials;
+    const auto devices = parseDevices( output );
+    for ( const auto& device : devices ) {
+        if ( device.isReady() ) {
+            serials.append( device.serial );
+        }
+    }
+    return serials;
+}
+
+QList<Device> AdbProcess::parseDevices( const QByteArray& output )
+{
+    // Parse output.  Format, short (`adb devices`) or long (`-l`):
     //   List of devices attached
     //   SERIAL1\tdevice
-    //   SERIAL2\tunauthorized
+    //   SERIAL2        device usb:1-1 product:shiba model:Pixel_8 device:shiba
+    //   SERIAL3        unauthorized usb:1-2 transport_id:3
+    //   SERIAL4        no permissions (…); see [http://…] usb:3-1
     //   <blank line>
-    QStringList devices;
+    QList<Device> devices;
     const auto lines = output.split( '\n' );
 
     for ( const auto& line : lines ) {
         const auto trimmed = line.trimmed();
-        if ( trimmed.isEmpty() || trimmed.startsWith( "List of" ) ) {
+        // The header, and what adb says when it starts its server ("* daemon …")
+        if ( trimmed.isEmpty() || trimmed.startsWith( "List of" ) || trimmed.startsWith( '*' ) ) {
             continue;
         }
 
-        const auto parts = trimmed.split( '\t' );
-        if ( parts.size() >= 2 && parts[ 1 ].trimmed() == "device" ) {
-            devices.append( QString::fromUtf8( parts[ 0 ].trimmed() ) );
+        const auto fields = trimmed.simplified().split( ' ' );
+        if ( fields.size() < 2 ) {
+            continue;
         }
+
+        Device device;
+        device.serial = QString::fromUtf8( fields[ 0 ] );
+        device.state = QString::fromUtf8( fields[ 1 ] );
+        if ( device.state == QLatin1String( "no" ) && fields.size() > 2
+             && fields[ 2 ] == "permissions" ) {
+            device.state = QStringLiteral( "no permissions" );
+        }
+        for ( const auto& field : fields.mid( 2 ) ) {
+            if ( field.startsWith( "model:" ) ) {
+                device.model = QString::fromUtf8( field.mid( 6 ) ).replace( '_', ' ' );
+            }
+        }
+        devices.append( device );
     }
 
     return devices;

@@ -44,6 +44,8 @@
 #include <QSignalBlocker>
 #include <QTimer>
 
+#include <algorithm>
+
 namespace logcat {
 
 namespace {
@@ -150,7 +152,8 @@ void Sessions::refreshDevices()
     }
 
     scanProcess_->setProgram( adb );
-    scanProcess_->setArguments( { "devices" } );
+    // -l: also the model of each device
+    scanProcess_->setArguments( { "devices", "-l" } );
     // Arm the timeout first: on Windows a failed start is reported from
     // inside start(), and that handler stops the timeout.
     scanTimeout_->start();
@@ -175,7 +178,7 @@ void Sessions::onScanFinished( int exitCode, QProcess::ExitStatus exitStatus )
 {
     scanTimeout_->stop();
 
-    QStringList found;
+    QList<Device> found;
     if ( exitStatus == QProcess::CrashExit ) {
         // Killed after the timeout, which has been logged already
     }
@@ -185,8 +188,16 @@ void Sessions::onScanFinished( int exitCode, QProcess::ExitStatus exitStatus )
                      + QString::fromUtf8( scanProcess_->readAllStandardError() ).trimmed() );
     }
     else {
-        found = AdbProcess::parseDeviceList( scanProcess_->readAllStandardOutput() );
-        hostLog( LOGSQUIRL_LOG_INFO, QString( "Discovered %1 device(s)." ).arg( found.size() ) );
+        found = AdbProcess::parseDevices( scanProcess_->readAllStandardOutput() );
+        // The sidebar rescans every few seconds: only news is logged.
+        if ( !scanned_ || found != attached_ ) {
+            const auto ready = std::count_if( found.cbegin(), found.cend(),
+                                              []( const Device& d ) { return d.isReady(); } );
+            hostLog(
+                LOGSQUIRL_LOG_INFO,
+                QString( "Discovered %1 device(s), %2 ready." ).arg( found.size() ).arg( ready ) );
+        }
+        scanned_ = true;
     }
 
     setDevices( found );
@@ -204,9 +215,15 @@ void Sessions::onScanEnded()
     }
 }
 
-void Sessions::setDevices( const QStringList& devices )
+void Sessions::setDevices( const QList<Device>& devices )
 {
-    devices_ = devices;
+    attached_ = devices;
+    devices_.clear();
+    for ( const auto& device : devices ) {
+        if ( device.isReady() ) {
+            devices_.append( device.serial );
+        }
+    }
     Q_EMIT devicesChanged();
 }
 

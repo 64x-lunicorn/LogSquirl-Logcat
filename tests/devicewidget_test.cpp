@@ -19,10 +19,10 @@
 
 /**
  * @file devicewidget_test.cpp
- * @brief BDD tests for the dialog and the sidebar, the views of Sessions.
+ * @brief BDD tests for the dialog, a view of Sessions.
  *
- * The views are driven through their widgets and through the Sessions
- * they show, with a FakeHost and a stand-in for adb (see fakeadb.h).
+ * The dialog is driven through its widgets and through the Sessions
+ * it shows, with a FakeHost and a stand-in for adb (see fakeadb.h).
  */
 
 #include <catch2/catch.hpp>
@@ -30,19 +30,15 @@
 #include "devicewidget.h"
 #include "fakeadb.h"
 #include "sessions.h"
-#include "sidebarwidget.h"
 
-#include <QComboBox>
 #include <QFile>
 #include <QLabel>
-#include <QListWidget>
 #include <QPushButton>
 
 #include <array>
 
 using logcat::DeviceWidget;
 using logcat::Sessions;
-using logcat::SidebarWidget;
 using logcat_test::FakeHost;
 using logcat_test::waitFor;
 
@@ -151,108 +147,9 @@ SCENARIO( "the dialog's Refresh button shows a running device scan", "[devicewid
 #endif
 
 #ifdef Q_OS_UNIX
-SCENARIO( "the sidebar follows the sessions as they start and stop", "[sidebarwidget]" )
+SCENARIO( "an adb path is shown as plain text", "[devicewidget]" )
 {
-    const QString serial = "emulator-5554";
-
-    GIVEN( "a sidebar over sessions with a working adb" )
-    {
-        FakeHost host;
-        logcat_test::installFakeAdb( host );
-        Sessions sessions;
-        const SidebarWidget sidebar( &sessions );
-        REQUIRE( waitFor( [ &sessions ]() { return !sessions.devices().isEmpty(); } ) );
-        auto* list = sidebar.findChild<QListWidget*>();
-        auto* combo = sidebar.findChild<QComboBox*>();
-        REQUIRE( list != nullptr );
-        REQUIRE( combo != nullptr );
-        REQUIRE( list->count() == 0 );
-
-        WHEN( "a session is started elsewhere, e.g. in the dialog" )
-        {
-            REQUIRE( sessions.startSession( serial ) );
-
-            THEN( "the sidebar lists it and marks its device right away" )
-            {
-                REQUIRE( list->count() == 1 );
-                REQUIRE( labelShowing( sidebar, serial ) != nullptr );
-                REQUIRE( combo->itemText( combo->findData( serial ) ) == serial + " ●" );
-            }
-
-            AND_WHEN( "it is stopped elsewhere" )
-            {
-                sessions.stopSession( serial );
-
-                THEN( "the sidebar no longer lists it, right away" )
-                {
-                    REQUIRE( list->count() == 0 );
-                    REQUIRE( combo->itemText( combo->findData( serial ) ) == serial );
-                }
-            }
-
-            sessions.stopAll();
-        }
-    }
-
-    GIVEN( "a sidebar over a session whose adb exits after one line" )
-    {
-        FakeHost host;
-        logcat_test::installFakeAdb( host, "printf 'only\\n'\n" );
-        Sessions sessions;
-        const SidebarWidget sidebar( &sessions );
-        auto* list = sidebar.findChild<QListWidget*>();
-        REQUIRE( list != nullptr );
-        bool listedWhenStopped = true;
-        QObject::connect( &sessions, &Sessions::sessionStopped, [ list, &listedWhenStopped ]() {
-            listedWhenStopped = list->count() > 0;
-        } );
-        int stops = 0;
-        QObject::connect( &sessions, &Sessions::sessionStopped, [ &stops ]() { ++stops; } );
-        REQUIRE( sessions.startSession( serial ) );
-        REQUIRE( list->count() == 1 );
-
-        WHEN( "adb has exited" )
-        {
-            REQUIRE( waitFor( [ &stops ]() { return stops == 1; } ) );
-
-            THEN( "the sidebar dropped the session when it stopped" )
-            {
-                REQUIRE_FALSE( listedWhenStopped );
-                REQUIRE( list->count() == 0 );
-            }
-        }
-    }
-}
-#endif
-
-#ifdef Q_OS_UNIX
-SCENARIO( "a serial and an adb path are shown as plain text", "[devicewidget]" )
-{
-    // Any USB gadget can name itself; a label would render markup in its
-    // serial as rich text, and load what an <img> in it points to.
-    GIVEN( "a session for a device whose serial is markup" )
-    {
-        FakeHost host;
-        logcat_test::installFakeAdb( host );
-        Sessions sessions;
-        const SidebarWidget sidebar( &sessions );
-        const QString serial = "<b>emulator-5554</b>";
-        REQUIRE( Qt::mightBeRichText( serial ) );
-        REQUIRE( sessions.startSession( serial ) );
-
-        THEN( "the sidebar's session list shows the serial as its literal text" )
-        {
-            QLabel* label = nullptr;
-            REQUIRE( waitFor( [ & ]() {
-                label = labelShowing( sidebar, serial );
-                return label != nullptr;
-            } ) );
-            REQUIRE( label->textFormat() == Qt::PlainText );
-        }
-
-        sessions.stopAll();
-    }
-
+    // The sidebar's tiles show a serial as plain text (sidebarwidget_test.cpp).
     GIVEN( "an adb path that is markup" )
     {
         FakeHost host;

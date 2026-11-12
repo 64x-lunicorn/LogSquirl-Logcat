@@ -460,12 +460,16 @@ SCENARIO( "stopAll keeps temporary log files for their tabs", "[sessions]" )
         REQUIRE( sessions->startSession( "emulator-5554" ) );
         REQUIRE( host.openedFiles.size() == 1 );
         const auto tempFile = host.openedFiles.first();
-        const auto scansBefore = host.logs.filter( "Discovered" ).size();
+        // A scan started by stopAll() would be announced (scanningChanged()).
+        REQUIRE( waitFor( [ sessions ]() { return !sessions->isScanning(); } ) );
+        int scansDuringStop = 0;
+        QObject::connect( sessions, &Sessions::scanningChanged,
+                          [ &scansDuringStop ]() { ++scansDuringStop; } );
 
         WHEN( "the user stops all sessions: stopAll(), then Sessions is deleted" )
         {
             sessions->stopAll();
-            const auto scansDuringStop = host.logs.filter( "Discovered" ).size() - scansBefore;
+            QObject::disconnect( sessions, &Sessions::scanningChanged, nullptr, nullptr );
             delete sessions;
 
             THEN( "the temporary file is kept for its tab" )
@@ -596,7 +600,12 @@ SCENARIO( "devices are discovered in the background", "[sessions]" )
                     REQUIRE( waitFor( [ &changes ]() { return changes == 2; }, 8000 ) );
                     logcat_test::processEventsFor( 1500 ); // time for a third scan
                     REQUIRE( changes == 2 );
-                    REQUIRE( host.logs.filter( "Discovered" ).size() == 2 );
+                }
+
+                THEN( "the devices are logged once, as the second scan finds the same" )
+                {
+                    REQUIRE( waitFor( [ &changes ]() { return changes == 2; }, 8000 ) );
+                    REQUIRE( host.logs.filter( "Discovered" ).size() == 1 );
                 }
             }
         }
@@ -649,6 +658,64 @@ SCENARIO( "devices are discovered in the background", "[sessions]" )
                 REQUIRE_FALSE( sessions.isScanning() );
                 REQUIRE( scanningChanges >= 1 );
                 REQUIRE( sessions.devices().isEmpty() );
+            }
+        }
+    }
+}
+#endif
+
+#ifdef Q_OS_UNIX
+SCENARIO( "Sessions knows every attached device, its state and its model", "[sessions]" )
+{
+    GIVEN( "an adb that lists a ready, an unauthorized and an offline device with -l" )
+    {
+        FakeHost host;
+        // The long format only when asked for it, as adb does
+        logcat_test::installFakeAdb(
+            host, "exec sleep 30\n",
+            "if [ \"$2\" = -l ]; then\n"
+            "printf 'List of devices attached\\n"
+            "3A1B2C3D4E5F  device usb:1-1 product:shiba model:Pixel_8 device:shiba\\n"
+            "NOAUTH456     unauthorized usb:1-2 transport_id:3\\n"
+            "OFFLINE123    offline transport_id:4\\n\\n'\n"
+            "else\n"
+            "printf 'List of devices attached\\n3A1B2C3D4E5F\\tdevice\\n\\n'\n"
+            "fi\n" );
+
+        WHEN( "Sessions has scanned" )
+        {
+            Sessions sessions;
+            REQUIRE( waitFor( [ &sessions ]() { return !sessions.devices().isEmpty(); } ) );
+
+            THEN( "every device is attached, with its state, and the ready one with its model" )
+            {
+                const auto& attached = sessions.attachedDevices();
+                REQUIRE( attached.size() == 3 );
+                REQUIRE( attached[ 0 ].serial == "3A1B2C3D4E5F" );
+                REQUIRE( attached[ 0 ].model == "Pixel 8" );
+                REQUIRE( attached[ 1 ].state == "unauthorized" );
+                REQUIRE( attached[ 2 ].state == "offline" );
+            }
+
+            THEN( "only the ready device can run logcat" )
+            {
+                REQUIRE( sessions.devices() == QStringList{ "3A1B2C3D4E5F" } );
+            }
+
+            AND_WHEN( "a scan fails" )
+            {
+                logcat_test::installBrokenAdb( host );
+                int changes = 0;
+                QObject::connect( &sessions, &Sessions::devicesChanged,
+                                  [ &changes ]() { ++changes; } );
+                sessions.refreshDevices();
+                REQUIRE( waitFor( [ &changes ]() { return changes == 1; } ) );
+
+                THEN( "no device is attached any more" )
+                {
+                    REQUIRE( sessions.attachedDevices().isEmpty() );
+                    REQUIRE( sessions.devices().isEmpty() );
+                }
             }
         }
     }
