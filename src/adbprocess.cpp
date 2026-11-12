@@ -28,7 +28,7 @@
  *      - ANDROID_HOME / ANDROID_SDK_ROOT environment variables
  *      - System PATH
  *
- *   2. DeviceWidget runs `adb devices` in the background, and
+ *   2. Sessions (sessions.h) runs `adb devices` in the background, and
  *      parseDeviceList() extracts the serials of devices in the "device"
  *      state from its tabular output.
  *
@@ -351,12 +351,16 @@ bool AdbProcess::start()
 
     writeFailed_ = false;
     lineCount_ = 0;
+    counters_ = {};
+    // A save path is appended to: what it holds already is in the file.
+    counters_.fileBytes = tempFile_.size();
     readBuffer_.clear();
     stderrBuffer_.clear();
     lastStderrLine_.clear();
 
     process_->setProgram( adb );
     process_->setArguments( { "-s", serial_, "logcat" } );
+    counters_.startTime = QDateTime::currentDateTime();
     process_->start();
 
     // Wait for the launch itself (not for any output) so that a failure is
@@ -522,6 +526,8 @@ QString AdbProcess::rotateLog()
 
     ++rotationCount_;
     lineCount_ = 0;
+    ++counters_.rotations;
+    counters_.fileBytes = 0;
 
     hostLog( LOGSQUIRL_LOG_INFO, QString( "Rotated logcat log for %1 (rotation #%2)" )
                                      .arg( serial_ )
@@ -552,6 +558,10 @@ bool AdbProcess::writeLine( const QByteArray& line )
         return false;
     }
     ++lineCount_;
+    const auto written = line.size() + 1;
+    ++counters_.lines;
+    counters_.bytes += written;
+    counters_.fileBytes += written;
     return true;
 }
 

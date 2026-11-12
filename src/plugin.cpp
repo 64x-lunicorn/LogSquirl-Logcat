@@ -37,11 +37,12 @@
  *   2. Host calls init_ex(api, handle, api_size) — or init(api, handle),
  *      which is init_ex() with the base table's size, if it is older than
  *      LogSquirl 26.11 — we store the pointers and the size, add the
- *      Plugins menu entry, create the DeviceWidget and a SidebarWidget over
- *      it, and register the latter as a sidebar tab.
- *   3. User interacts with the widget (refresh, start, stop, …).
+ *      Plugins menu entry, create the Sessions, and the DeviceWidget and a
+ *      SidebarWidget over them, and register the latter as a sidebar tab.
+ *   3. User interacts with the widgets (refresh, start, stop, …).
  *   4. Host calls shutdown() — we unregister + delete the sidebar, stop all
- *      logcat sessions, delete the DeviceWidget, and clear state.
+ *      logcat sessions, delete the DeviceWidget and the Sessions, and clear
+ *      state.
  *
  * No exception may leave an entry point or a host callback: the host is C,
  * and an exception escaping into it terminates LogSquirl.  Their work runs
@@ -54,6 +55,7 @@
 
 #include "adbprocess.h"
 #include "devicewidget.h"
+#include "sessions.h"
 #include "sidebarwidget.h"
 #include "tempdirs.h"
 
@@ -135,8 +137,11 @@ static bool guarded( const char* what, Work&& work ) noexcept
 static void showLogcatDialog( void* /* userData */ )
 {
     guarded( "showing the Android Logcat dialog", [] {
+        if ( !logcat::g_state.sessions ) {
+            return; // not initialised
+        }
         if ( !logcat::g_state.dialog ) {
-            logcat::g_state.dialog = new logcat::DeviceWidget();
+            logcat::g_state.dialog = new logcat::DeviceWidget( logcat::g_state.sessions );
         }
         auto* dialog = logcat::g_state.dialog;
 
@@ -183,9 +188,9 @@ LOGSQUIRL_PLUGIN_EXPORT const LogSquirlPluginInfo* logsquirl_plugin_get_info( vo
  *                  build: it tells which later functions the host has.
  * @return 0 on success, non-zero on failure.
  *
- * Stores the host API and handle, creates a DeviceWidget, and registers
- * a sidebar tab over it.  A failure is logged and undone (shutdown()), and
- * init returns 1.
+ * Stores the host API and handle, creates the Sessions and a DeviceWidget
+ * over them, and registers a sidebar tab over them.  A failure is logged and undone (shutdown()),
+ * and init returns 1.
  */
 LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init_ex( const LogSquirlHostApi* api, void* handle,
                                                       size_t api_size )
@@ -213,20 +218,22 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init_ex( const LogSquirlHostApi* ap
         api->register_menu_action( handle, "Plugins", "Android Logcat\u2026", &showLogcatDialog,
                                    nullptr );
 
-        // Create the DeviceWidget early so the sidebar panel can reference it.
-        logcat::g_state.dialog = new logcat::DeviceWidget();
+        // The devices and their sessions, which the dialog and the sidebar
+        // show.  Creating it starts the first device scan.
+        logcat::g_state.sessions = new logcat::Sessions();
+        logcat::g_state.dialog = new logcat::DeviceWidget( logcat::g_state.sessions );
 
         // The host shuts the plugin down both when LogSquirl quits (after
         // aboutToQuit) and when the plugin is disabled or updated at runtime,
         // with the tabs left open; only in the first case may the temporary
         // files go.
         if ( auto* app = QCoreApplication::instance() ) {
-            QObject::connect( app, &QCoreApplication::aboutToQuit, logcat::g_state.dialog,
+            QObject::connect( app, &QCoreApplication::aboutToQuit, logcat::g_state.sessions,
                               []() { logcat::g_state.quitting = true; } );
         }
 
         // Register a sidebar tab for logcat session management
-        logcat::g_state.sidebarWidget = new logcat::SidebarWidget( logcat::g_state.dialog );
+        logcat::g_state.sidebarWidget = new logcat::SidebarWidget( logcat::g_state.sessions );
         api->register_sidebar_tab( handle, "Logcat",
                                    static_cast<void*>( logcat::g_state.sidebarWidget ) );
         logcat::g_state.sidebarTabRegistered = true;
@@ -281,10 +288,16 @@ LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void )
         st.sidebarWidget = nullptr;
     }
 
+    if ( st.sessions ) {
+        guarded( "stopping the logcat sessions", [] { logcat::g_state.sessions->stopAll(); } );
+    }
     if ( st.dialog ) {
-        guarded( "stopping the logcat sessions", [] { logcat::g_state.dialog->stopAll(); } );
         guarded( "shutdown", [] { delete logcat::g_state.dialog; } );
         st.dialog = nullptr;
+    }
+    if ( st.sessions ) {
+        guarded( "shutdown", [] { delete logcat::g_state.sessions; } );
+        st.sessions = nullptr;
     }
 
     // The tabs close with LogSquirl: remove the files of every instance of

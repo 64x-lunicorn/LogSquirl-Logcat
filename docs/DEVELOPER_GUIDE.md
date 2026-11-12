@@ -322,20 +322,40 @@ classDiagram
     class PluginState {
         +LogSquirlHostApi* api
         +void* handle
+        +Sessions* sessions
         +DeviceWidget* dialog
+        +SidebarWidget* sidebarWidget
         +bool initialised
+    }
+
+    class Sessions {
+        -map~QString, AdbProcess*~ sessions_
+        -QProcess* scanProcess_
+        +devices() QStringList
+        +refreshDevices()
+        +startSession(serial, savePath) bool
+        +stopSession(serial)
+        +rotateSession(serial)
+        +stopAll()
+        +counters(serial) SessionCounters
+        sessionStarted(serial)
+        sessionStopped(serial)
+        sessionChanged(serial)
     }
 
     class DeviceWidget {
         -QComboBox* deviceCombo_
         -QPushButton* startButton_
         -QPushButton* stopButton_
-        -map~QString, AdbProcess*~ sessions_
-        -QProcess* scanProcess_
-        +refreshDevices()
-        +startCapture()
-        +stopCapture()
-        +stopAll()
+        -Sessions* sessions_
+        -startCapture()
+        -stopCapture()
+    }
+
+    class SidebarWidget {
+        -QComboBox* deviceCombo_
+        -QListWidget* sessionList_
+        -Sessions* sessions_
     }
 
     class AdbProcess {
@@ -351,8 +371,12 @@ classDiagram
         +findAdb()$ QString
     }
 
+    PluginState --> Sessions : sessions
     PluginState --> DeviceWidget : dialog
-    DeviceWidget --> AdbProcess : sessions_ (0..N)
+    PluginState --> SidebarWidget : sidebarWidget
+    DeviceWidget --> Sessions : view of
+    SidebarWidget --> Sessions : view of
+    Sessions --> AdbProcess : sessions_ (0..N)
 ```
 
 ### When to use a UI plugin

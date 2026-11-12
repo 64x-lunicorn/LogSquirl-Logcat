@@ -29,13 +29,15 @@
  *      and stop buttons.
  *   3. A "Stop All" button when multiple sessions are running.
  *
- * Session logic is delegated entirely to DeviceWidget so that the
- * dialog and sidebar remain in sync at all times.
+ * Session logic is delegated entirely to Sessions, and the panel refills
+ * itself on Sessions' signals, so that the dialog and sidebar remain in
+ * sync at all times.
  */
 
 #include "sidebarwidget.h"
-#include "devicewidget.h"
+#include "adbprocess.h"
 #include "plugin.h"
+#include "sessions.h"
 
 #include <QDir>
 #include <QFileDialog>
@@ -48,9 +50,9 @@ namespace logcat {
 
 // ── Construction ────────────────────────────────────────────────────────
 
-SidebarWidget::SidebarWidget( DeviceWidget* deviceWidget, QWidget* parent )
+SidebarWidget::SidebarWidget( Sessions* sessions, QWidget* parent )
     : QWidget( parent )
-    , deviceWidget_( deviceWidget )
+    , sessions_( sessions )
 {
     auto* mainLayout = new QVBoxLayout( this );
     mainLayout->setContentsMargins( 4, 4, 4, 4 );
@@ -127,7 +129,7 @@ SidebarWidget::SidebarWidget( DeviceWidget* deviceWidget, QWidget* parent )
     mainLayout->addStretch();
 
     // ── Connections ──────────────────────────────────────────────────
-    connect( refreshButton_, &QPushButton::clicked, this, &SidebarWidget::refreshDevices );
+    connect( refreshButton_, &QPushButton::clicked, sessions_, &Sessions::refreshDevices );
     connect( startButton_, &QPushButton::clicked, this, &SidebarWidget::startCapture );
     connect( stopButton_, &QPushButton::clicked, this, &SidebarWidget::stopSelectedCapture );
     connect( stopAllButton_, &QPushButton::clicked, this, &SidebarWidget::stopAllCaptures );
@@ -141,15 +143,14 @@ SidebarWidget::SidebarWidget( DeviceWidget* deviceWidget, QWidget* parent )
     } );
     connect( logDirEdit_, &QLineEdit::editingFinished, this, &SidebarWidget::saveLogDir );
     connect( deviceCombo_, &QComboBox::currentIndexChanged, this, [ this ]() { updateUiState(); } );
-    connect( deviceWidget_, &DeviceWidget::devicesChanged, this, &SidebarWidget::updateDeviceList );
 
-    // Periodic refresh of line counts in the session list (every 1 second)
-    refreshTimer_ = new QTimer( this );
-    refreshTimer_->setInterval( 1000 );
-    connect( refreshTimer_, &QTimer::timeout, this, &SidebarWidget::refreshSessionList );
-    refreshTimer_->start();
+    // ── Follow the sessions ──────────────────────────────────────────
+    connect( sessions_, &Sessions::devicesChanged, this, &SidebarWidget::updateDeviceList );
+    connect( sessions_, &Sessions::sessionStarted, this, &SidebarWidget::updateDeviceList );
+    connect( sessions_, &Sessions::sessionStopped, this, &SidebarWidget::updateDeviceList );
+    connect( sessions_, &Sessions::sessionChanged, this, &SidebarWidget::updateDeviceList );
 
-    // Initial populate.  DeviceWidget has started the first device scan;
+    // Initial populate.  Sessions has started the first device scan;
     // devicesChanged() fills in the result.
     loadLogDir();
     updateDeviceList();
@@ -157,17 +158,12 @@ SidebarWidget::SidebarWidget( DeviceWidget* deviceWidget, QWidget* parent )
 
 // ── Private slots ───────────────────────────────────────────────────────
 
-void SidebarWidget::refreshDevices()
-{
-    deviceWidget_->refreshDevices();
-}
-
 void SidebarWidget::updateDeviceList()
 {
     const auto currentSelection = currentSerial();
     deviceCombo_->clear();
 
-    const auto& devices = deviceWidget_->devices();
+    const auto& devices = sessions_->devices();
     if ( devices.isEmpty() ) {
         deviceCombo_->addItem( "(no devices)" );
         deviceCombo_->setEnabled( false );
@@ -175,7 +171,7 @@ void SidebarWidget::updateDeviceList()
     else {
         deviceCombo_->setEnabled( true );
         for ( const auto& serial : devices ) {
-            if ( deviceWidget_->isSessionActive( serial ) ) {
+            if ( sessions_->isSessionActive( serial ) ) {
                 deviceCombo_->addItem( serial + " ●", serial );
             }
             else {
@@ -201,8 +197,7 @@ void SidebarWidget::startCapture()
     }
 
     const auto savePath = generateSavePath( serial );
-    deviceWidget_->startSession( serial, savePath );
-    updateDeviceList();
+    sessions_->startSession( serial, savePath );
 }
 
 void SidebarWidget::stopSelectedCapture()
@@ -212,30 +207,14 @@ void SidebarWidget::stopSelectedCapture()
         return;
     }
 
-    deviceWidget_->stopSession( serial );
-    updateDeviceList();
+    sessions_->stopSession( serial );
 }
 
 void SidebarWidget::stopAllCaptures()
 {
-    deviceWidget_->stopAll();
+    sessions_->stopAll();
 
     hostNotify( "All logcat sessions stopped." );
-
-    updateDeviceList();
-}
-
-void SidebarWidget::refreshSessionList()
-{
-    // Only rebuild when the active session count changes
-    const int currentCount = deviceWidget_->activeSessionCount();
-    if ( sessionList_->count() != currentCount ) {
-        rebuildSessionList();
-        updateUiState();
-        return;
-    }
-
-    // Names don't change — nothing to refresh for existing items
 }
 
 // ── Private helpers ─────────────────────────────────────────────────────
@@ -244,7 +223,7 @@ void SidebarWidget::rebuildSessionList()
 {
     sessionList_->clear();
 
-    const auto serials = deviceWidget_->activeSerials();
+    const auto serials = sessions_->activeSerials();
     for ( const auto& serial : serials ) {
         auto* item = new QListWidgetItem();
         sessionList_->addItem( item );
@@ -272,15 +251,11 @@ void SidebarWidget::rebuildSessionList()
         stopBtn->setToolTip( "Stop this session" );
         rowLayout->addWidget( stopBtn );
 
-        connect( rotateBtn, &QPushButton::clicked, this, [ this, serial ]() {
-            deviceWidget_->rotateSession( serial );
-            updateDeviceList();
-        } );
+        connect( rotateBtn, &QPushButton::clicked, this,
+                 [ this, serial ]() { sessions_->rotateSession( serial ); } );
 
-        connect( stopBtn, &QPushButton::clicked, this, [ this, serial ]() {
-            deviceWidget_->stopSession( serial );
-            updateDeviceList();
-        } );
+        connect( stopBtn, &QPushButton::clicked, this,
+                 [ this, serial ]() { sessions_->stopSession( serial ); } );
 
         // Replace the plain text item with the custom widget
         item->setSizeHint( row->sizeHint() );
@@ -299,8 +274,8 @@ void SidebarWidget::updateUiState()
 {
     const auto serial = currentSerial();
     const bool hasDevice = !serial.isEmpty();
-    const bool isActive = hasDevice && deviceWidget_->isSessionActive( serial );
-    const int activeCount = deviceWidget_->activeSessionCount();
+    const bool isActive = hasDevice && sessions_->isSessionActive( serial );
+    const int activeCount = sessions_->activeSessionCount();
 
     startButton_->setEnabled( hasDevice && !isActive );
     stopButton_->setEnabled( isActive );

@@ -39,6 +39,7 @@ add_library(logsquirl_logcat SHARED
     src/plugin.cpp
     src/adbprocess.cpp
     src/tempdirs.cpp
+    src/sessions.cpp
     src/devicewidget.cpp
     src/sidebarwidget.cpp
 )

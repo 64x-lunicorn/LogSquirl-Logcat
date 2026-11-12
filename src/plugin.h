@@ -44,6 +44,7 @@
 
 namespace logcat {
 class DeviceWidget;
+class Sessions;
 class SidebarWidget;
 } // namespace logcat
 
@@ -59,8 +60,9 @@ namespace logcat {
 struct PluginState {
     const LogSquirlHostApi* api = nullptr;  ///< Host API function table.
     void* handle = nullptr;                 ///< Opaque plugin instance handle.
-    DeviceWidget* dialog = nullptr;         ///< Logcat session dialog.
-    SidebarWidget* sidebarWidget = nullptr; ///< Sidebar panel for session control.
+    Sessions* sessions = nullptr;           ///< The devices and their logcat sessions.
+    DeviceWidget* dialog = nullptr;         ///< Logcat session dialog, a view of sessions.
+    SidebarWidget* sidebarWidget = nullptr; ///< Sidebar panel, a view of sessions.
     bool sidebarTabRegistered = false;      ///< The host holds sidebarWidget as a tab.
     /// The size of the host's table (init_ex()): a function added after
     /// LogSquirl 26.10 may be used only if LOGSQUIRL_HOST_API_HAS( hostApiSize,

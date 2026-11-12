@@ -30,34 +30,30 @@
  *     per-session Rotate / Stop buttons
  *   - A "Stop All" button
  *
- * The panel delegates session management to the DeviceWidget (which also
- * remains available as a standalone dialog via the Plugins menu).  Both
- * the sidebar and the dialog share the same underlying sessions_ map
- * inside DeviceWidget.
+ * The panel is a view of the plugin's Sessions (sessions.h), like the
+ * dialog (devicewidget.h) that remains available via the Plugins menu:
+ * both show the same devices and sessions, and Sessions' signals keep
+ * them in sync.
  */
 
 #pragma once
-
-#include "adbprocess.h"
 
 #include <QComboBox>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
-#include <QTimer>
 #include <QWidget>
 
 namespace logcat {
 
-class DeviceWidget;
+class Sessions;
 
 /**
  * Sidebar panel widget for logcat session control.
  *
  * Embeds device selection and an active-sessions list.  All actual
- * session logic is delegated to DeviceWidget so that the dialog
- * and the sidebar stay in sync.
+ * session logic is in Sessions; the panel refills itself on its signals.
  */
 class SidebarWidget : public QWidget {
     Q_OBJECT
@@ -66,16 +62,13 @@ public:
     /**
      * Construct the sidebar panel.
      *
-     * @param deviceWidget  Shared DeviceWidget that owns the sessions.
-     *                      Must outlive this widget.
-     * @param parent        QWidget parent.
+     * @param sessions  The devices and sessions the panel shows.  Must
+     *                  outlive this widget.
+     * @param parent    QWidget parent.
      */
-    explicit SidebarWidget( DeviceWidget* deviceWidget, QWidget* parent = nullptr );
+    explicit SidebarWidget( Sessions* sessions, QWidget* parent = nullptr );
 
 private Q_SLOTS:
-    /** Re-scan for ADB devices (in the background, see DeviceWidget). */
-    void refreshDevices();
-
     /** Refill the device combo box and the sessions list. */
     void updateDeviceList();
 
@@ -87,9 +80,6 @@ private Q_SLOTS:
 
     /** Stop all active sessions. */
     void stopAllCaptures();
-
-    /** Periodic refresh of the active-sessions list (line counts). */
-    void refreshSessionList();
 
 private:
     /** Build or rebuild the sessions list widget contents. */
@@ -111,7 +101,7 @@ private:
     void saveLogDir();
 
     // ── Shared state ─────────────────────────────────────────────────
-    DeviceWidget* deviceWidget_ = nullptr;
+    Sessions* sessions_ = nullptr;
 
     // ── UI elements ──────────────────────────────────────────────────
     QComboBox* deviceCombo_ = nullptr;
@@ -123,9 +113,6 @@ private:
     QPushButton* logDirBrowseButton_ = nullptr;
     QListWidget* sessionList_ = nullptr;
     QLabel* statusLabel_ = nullptr;
-
-    // ── Periodic refresh ─────────────────────────────────────────────
-    QTimer* refreshTimer_ = nullptr;
 };
 
 } // namespace logcat

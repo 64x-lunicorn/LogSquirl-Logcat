@@ -53,6 +53,19 @@
 
 namespace logcat {
 
+/// What a logcat session has captured since start(), as AdbProcess::counters()
+/// reads it.
+struct SessionCounters {
+    qint64 lines = 0;     ///< Lines written since start(), over all of its files.
+    qint64 bytes = 0;     ///< Bytes written since start(), newlines included, over all files.
+    qint64 fileBytes = 0; ///< Size of the current file, with what a save path held before.
+    int rotations = 0;    ///< How often the log was rotated since start().
+    /// Size of the current file at which it rotates next; 0: only when
+    /// asked to (rotateLog()), as logcat has no size limit.
+    qint64 nextRotationBytes = 0;
+    QDateTime startTime; ///< When start() launched adb; null before.
+};
+
 /**
  * Manages a single `adb logcat` process for one device.
  *
@@ -255,10 +268,16 @@ public:
         return usingSavePath_;
     }
 
-    /** Total number of lines captured so far. */
+    /** Number of lines in the current file: it starts from 0 on each rotation. */
     qint64 lineCount() const
     {
         return lineCount_;
+    }
+
+    /** What the session has captured since start(), read live. */
+    SessionCounters counters() const
+    {
+        return counters_;
     }
 
 Q_SIGNALS:
@@ -334,7 +353,8 @@ private:
     QByteArray stderrBuffer_; ///< Accumulates partial lines from stderr, cut at kMaxLineBytes.
     QString lastStderrLine_;  ///< Last line adb wrote to stderr.
     qint64 lineCount_ = 0;
-    int rotationCount_ = 0;       ///< Incremented on each rotateLog() call.
+    SessionCounters counters_;    ///< Since start(); counters_.rotations counts rotateLog().
+    int rotationCount_ = 0;       ///< Incremented on each rotateLog() call; names the files.
     bool usingSavePath_ = false;  ///< True when writing directly to the log directory.
     bool createdLogFile_ = false; ///< True when start() created the log file.
     bool stopping_ = false;       ///< True while stop() ends the process.

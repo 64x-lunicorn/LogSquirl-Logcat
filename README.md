@@ -194,17 +194,21 @@ graph TD
     subgraph Plugin — C ABI Boundary
         P[plugin.cpp<br/>get_info / init /<br/>shutdown / configure]
         SW[SidebarWidget<br/>device selector + session list]
-        DW[DeviceWidget<br/>session management]
+        DW[DeviceWidget<br/>dialog]
+        S[Sessions<br/>device scan + sessions]
         AP1[AdbProcess #1<br/>emulator-5554]
         AP2[AdbProcess #2<br/>R5CR10XXXXX]
     end
 
     H -- register_sidebar_tab --> P
+    P -- creates --> S
     P -- creates --> SW
-    SW -- uses --> DW
+    P -- creates --> DW
+    SW -- view of --> S
+    DW -- view of --> S
     SW --> SB
-    DW -- manages --> AP1
-    DW -- manages --> AP2
+    S -- manages --> AP1
+    S -- manages --> AP2
     AP1 -- writes --> TF1[Temp File #1]
     AP2 -- writes --> TF2[Temp File #2]
     TF1 -- open_file follow=1 --> H
@@ -216,28 +220,30 @@ graph TD
 ```mermaid
 sequenceDiagram
     participant User
-    participant DW as DeviceWidget
+    participant SW as SidebarWidget
+    participant S as Sessions
     participant AP as AdbProcess
     participant ADB as adb logcat
     participant TF as Temp File
     participant LS as LogSquirl Tab
 
     User->>SW: Click Start
-    SW->>DW: startSession(serial)
-    DW->>AP: start()
+    SW->>S: startSession(serial)
+    S->>AP: start()
     AP->>ADB: spawn adb -s SERIAL logcat
     AP->>TF: create temp file
-    AP-->>DW: open_file(tempPath, follow=1)
-    DW-->>LS: New tab opens
+    S-->>LS: open_file(tempPath, follow=1): new tab
+    S-->>SW: sessionStarted(serial)
     loop Streaming
         ADB->>AP: stdout lines
         AP->>TF: write + flush
         LS->>TF: tail/follow reads
     end
     User->>SW: Click Stop
-    SW->>DW: stopSession(serial)
-    DW->>AP: preserveTempFile() + stop()
+    SW->>S: stopSession(serial)
+    S->>AP: stop() + preserveTempFile()
     AP->>ADB: SIGTERM
+    S-->>SW: sessionStopped(serial)
     Note over LS: Tab stays open with captured output
 ```
 
@@ -270,7 +276,9 @@ logsquirl-logcat/
 │   ├── plugin.cpp              # C ABI entry points (get_info, init, shutdown)
 │   ├── adbprocess.h            # ADB discovery + per-device QProcess wrapper
 │   ├── adbprocess.cpp
-│   ├── devicewidget.h          # Session management (start/stop/rotate)
+│   ├── sessions.h              # Device scan + sessions (start/stop/rotate, counters)
+│   ├── sessions.cpp
+│   ├── devicewidget.h          # The Android Logcat dialog, a view of Sessions
 │   ├── devicewidget.cpp
 │   ├── sidebarwidget.h         # LogSquirl sidebar tab (device list + controls)
 │   └── sidebarwidget.cpp
@@ -317,7 +325,7 @@ building your own plugins.
 2. Rename the library in `CMakeLists.txt`
 3. Update `plugin.json` with your plugin's identity
 4. Modify `plugin.cpp` entry points
-5. Replace `AdbProcess` + `DeviceWidget` with your own logic
+5. Replace `AdbProcess` + `Sessions` with your own logic
 6. Build and install
 
 ## License
