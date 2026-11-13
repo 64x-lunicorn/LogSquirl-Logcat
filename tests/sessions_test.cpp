@@ -370,7 +370,7 @@ SCENARIO( "stopping all sessions waits for them together", "[sessions]" )
         REQUIRE( waitFor( [ sessions, &serials ]() {
             return std::all_of( serials.cbegin(), serials.cend(),
                                 [ sessions ]( const auto& serial ) {
-                                    return sessions->sessionLineCount( serial ) > 0;
+                                    return sessions->counters( serial ).lines > 0;
                                 } );
         } ) );
 
@@ -509,7 +509,6 @@ SCENARIO( "a session's counters can be read while it runs", "[sessions]" )
                 REQUIRE( counters.rotations == 1 );
                 REQUIRE( counters.bytes == 12 ); // "first\n", "after\n"
                 REQUIRE( counters.fileBytes == 6 );
-                REQUIRE( sessions.sessionLineCount( serial ) == 1 );
                 REQUIRE( host.openedFiles.size() == 2 );
                 REQUIRE( sessions.filePath( serial ) == host.openedFiles.last() );
                 REQUIRE( QFileInfo( host.openedFiles.last() ).size() == counters.fileBytes );

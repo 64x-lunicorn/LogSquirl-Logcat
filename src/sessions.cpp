@@ -125,7 +125,7 @@ bool Sessions::startSession( const QString& serial, const QString& savePath )
     sessions_.insert( serial, proc );
 
     // Ask the host to open the log file in a follow-mode tab
-    openFollowed( proc->tempFilePath() );
+    openFollowed( proc->logFilePath() );
     hostNotify( QString( "Logcat started for %1" ).arg( serial ) );
 
     Q_EMIT sessionStarted( serial );
@@ -207,12 +207,6 @@ QStringList Sessions::activeSerials() const
     return sessions_.keys();
 }
 
-qint64 Sessions::sessionLineCount( const QString& serial ) const
-{
-    const auto* proc = sessions_.value( serial, nullptr );
-    return proc ? proc->lineCount() : 0;
-}
-
 SessionCounters Sessions::counters( const QString& serial ) const
 {
     const auto* proc = sessions_.value( serial, nullptr );
@@ -222,7 +216,7 @@ SessionCounters Sessions::counters( const QString& serial ) const
 QString Sessions::filePath( const QString& serial ) const
 {
     const auto* proc = sessions_.value( serial, nullptr );
-    return proc ? proc->tempFilePath() : QString();
+    return proc ? proc->logFilePath() : QString();
 }
 
 // ── Private ─────────────────────────────────────────────────────────────
@@ -270,12 +264,12 @@ bool Sessions::isFileInUse( const QString& path ) const
 {
     // The file a session writes to, as start() expands a path with ~.  A
     // relative path, which start() refuses, is no session's file.
-    const auto file = AdbProcess::absoluteUserPath( path );
+    const auto file = LogFile::absoluteUserPath( path );
     if ( file.isEmpty() ) {
         return false;
     }
     for ( const auto* proc : sessions_ ) {
-        if ( isSameFile( proc->tempFilePath(), file ) ) {
+        if ( isSameFile( proc->logFilePath(), file ) ) {
             return true;
         }
     }

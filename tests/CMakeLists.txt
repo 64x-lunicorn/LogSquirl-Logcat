@@ -19,6 +19,7 @@ add_executable(logsquirl_logcat_tests
     parsedevicelist_test.cpp
     plugininfo_test.cpp
     adbprocess_test.cpp
+    logfile_test.cpp
     hostapi_test.cpp
     takelines_test.cpp
     sessions_test.cpp
@@ -59,6 +60,7 @@ target_sources(logsquirl_logcat_tests
     PRIVATE
         "${CMAKE_SOURCE_DIR}/src/plugin.cpp"
         "${CMAKE_SOURCE_DIR}/src/adbprocess.cpp"
+        "${CMAKE_SOURCE_DIR}/src/logfile.cpp"
         "${CMAKE_SOURCE_DIR}/src/tempdirs.cpp"
         "${CMAKE_SOURCE_DIR}/src/sessions.cpp"
         "${CMAKE_SOURCE_DIR}/src/devicescan.cpp"

@@ -419,15 +419,28 @@ classDiagram
     class AdbProcess {
         -QString serial_
         -QProcess process_
-        -QTemporaryDir tempDir_
-        -QFile tempFile_
+        -LogFile logFile_
+        -SessionCounters counters_
         +start()
         +stop()
+        +rotateLog() QString
         +preserveTempFile()
-        +tempFilePath() QString
+        +logFilePath() QString
+        +counters() SessionCounters
         +parseDevices(QByteArray)$ QList~Device~
         +parseDeviceList(QByteArray)$ QStringList
         +findAdb()$ QString
+    }
+
+    class LogFile {
+        -QTemporaryDir tempDir_
+        -QFile file_
+        +open(QString&) bool
+        +writeLine(QByteArray) bool
+        +rotate(QString&) Rotation
+        +keepTempDir() QString
+        +path() QString
+        +generateLogPath(QString, QString)$ QString
     }
 
     PluginState --> DeviceScan : scan
@@ -445,6 +458,7 @@ classDiagram
     SidebarWidget --> DeviceTile : one per device
     SidebarWidget --> SettingsDialog : Settings…
     Sessions --> AdbProcess : sessions_ (0..N)
+    AdbProcess --> LogFile : writes through
 ```
 
 ### The sidebar tab: one tile per device

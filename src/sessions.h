@@ -118,10 +118,6 @@ public:
     /// Serials of the running sessions, sorted.
     QStringList activeSerials() const;
 
-    /// Lines in the current file of the session of @p serial (they start
-    /// from 0 on each rotation); 0 if it does not run.
-    qint64 sessionLineCount( const QString& serial ) const;
-
     /// What the session of @p serial has captured so far, read live; all
     /// zero (and a null start time) if it does not run.
     SessionCounters counters( const QString& serial ) const;

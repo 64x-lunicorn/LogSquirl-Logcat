@@ -35,9 +35,9 @@
  *
  *   3. start() launches `adb -s <serial> logcat` as a child process.
  *      Stdout is read incrementally (readyReadStandardOutput signal) and
- *      each complete line is written to a temporary file.
+ *      each complete line is written to the log file (logfile.h).
  *
- *   4. The host opens the temporary file with follow/tail mode, so lines
+ *   4. The host opens the log file with follow/tail mode, so lines
  *      appear in real-time as logcat produces output.
  *
  *   5. stop() ends the child process.
@@ -45,39 +45,19 @@
 
 #include "adbprocess.h"
 #include "plugin.h"
-#include "tempdirs.h"
 
-#include <QCoreApplication>
-#include <QDateTime>
 #include <QDeadlineTimer>
 #include <QDir>
 #include <QFileInfo>
 #include <QProcessEnvironment>
-#include <QRegularExpression>
 #include <QSettings>
 #include <QStandardPaths>
 
 #include <algorithm>
 
-#ifdef Q_OS_UNIX
-#include <cerrno>
-#include <cstring>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#endif
-
 namespace logcat {
 
 namespace {
-
-/// Make a device serial usable as part of a file name on every platform.
-QString safeFileName( const QString& serial )
-{
-    auto name = serial;
-    name.replace( QRegularExpression( "[^a-zA-Z0-9._-]" ), "_" );
-    return name;
-}
 
 /// @p text, cut short at AdbProcess::kMaxMessageChars characters.
 QString messageText( const QString& text )
@@ -100,9 +80,8 @@ QString messageText( const QString& text )
 AdbProcess::AdbProcess( const QString& serial, const QString& savePath, QObject* parent )
     : QObject( parent )
     , serial_( serial )
-    , savePath_( savePath )
     , process_( new QProcess( this ) )
-    , tempDir_( tempDirTemplate( tempRoot() ) )
+    , logFile_( serial, savePath )
 {
     // Connect QProcess signals to our slots, each through guarded(): an
     // exception must not unwind through Qt's event loop into the host.
@@ -323,35 +302,6 @@ QList<QByteArray> AdbProcess::takeLines( QByteArray& buffer, qsizetype maxLineBy
     return lines;
 }
 
-QString AdbProcess::absoluteUserPath( const QString& path )
-{
-    auto expanded = path.trimmed();
-    if ( expanded == QStringLiteral( "~" ) ) {
-        expanded = QDir::homePath();
-    }
-    else if ( expanded.startsWith( QStringLiteral( "~/" ) )
-              || expanded.startsWith( QStringLiteral( "~\\" ) ) ) {
-        expanded = QDir::homePath() + expanded.mid( 1 );
-    }
-    if ( expanded.isEmpty() || QDir::isRelativePath( expanded ) ) {
-        return {};
-    }
-    return QDir::cleanPath( expanded );
-}
-
-QString AdbProcess::generateLogPath( const QString& dir, const QString& serial,
-                                     const QDateTime& timestamp )
-{
-    const QDir logDir( dir );
-    const auto stem = timestamp.toString( "yyyy-MM-dd_HHmmss" ) + "_" + safeFileName( serial );
-
-    auto path = logDir.filePath( stem + ".log" );
-    for ( int n = 2; QFileInfo::exists( path ); ++n ) {
-        path = logDir.filePath( QString( "%1_%2.log" ).arg( stem ).arg( n ) );
-    }
-    return path;
-}
-
 // ── Instance: start / stop ──────────────────────────────────────────────
 
 bool AdbProcess::start()
@@ -362,10 +312,8 @@ bool AdbProcess::start()
 
     // The path the user typed is checked first: it is theirs to fix,
     // whether or not adb is found.
-    if ( !savePath_.isEmpty() && absoluteUserPath( savePath_ ).isEmpty() ) {
-        Q_EMIT errorOccurred(
-            QString( "The log file %1 is not a full path; give one such as %2." )
-                .arg( savePath_, QDir( QDir::homePath() ).filePath( "logcat.log" ) ) );
+    if ( const auto pathError = logFile_.pathError(); !pathError.isEmpty() ) {
+        Q_EMIT errorOccurred( pathError );
         return false;
     }
 
@@ -377,44 +325,15 @@ bool AdbProcess::start()
         return false;
     }
 
-    // When a save path is configured, write directly to the log directory
-    // instead of creating a temporary file.  This avoids accumulating
-    // orphaned temp files and ensures the user's log directory is used.
-    //
-    // Nothing is ever truncated: a save path is appended to, so that Stop
-    // and Start with the same path keep the earlier capture, and the temp
-    // file must be new.
-    QString path;
-    QIODevice::OpenMode mode = QIODevice::WriteOnly;
-    if ( !savePath_.isEmpty() ) {
-        path = absoluteUserPath( savePath_ );
-        QDir().mkpath( QFileInfo( path ).absolutePath() );
-        mode |= QIODevice::Append;
-    }
-    else {
-        if ( !tempDir_.isValid() ) {
-            Q_EMIT errorOccurred( "Failed to create temporary directory." );
-            return false;
-        }
-        path = tempDir_.filePath( "logcat_" + safeFileName( serial_ ) + ".log" );
-        mode |= QIODevice::NewOnly;
-    }
-
-    createdLogFile_ = !QFileInfo::exists( path );
     QString openError;
-    if ( !openLogFile( path, mode, openError ) ) {
-        Q_EMIT errorOccurred( "Failed to open log file " + path + ": " + openError );
-        tempFile_.setFileName( {} );
-        logPath_.clear();
+    if ( !logFile_.open( openError ) ) {
+        Q_EMIT errorOccurred( openError );
         return false;
     }
-    usingSavePath_ = !savePath_.isEmpty();
 
-    writeFailed_ = false;
-    lineCount_ = 0;
     counters_ = {};
     // A save path is appended to: what it holds already is in the file.
-    counters_.fileBytes = tempFile_.size();
+    counters_.fileBytes = logFile_.size();
     readBuffer_.clear();
     stderrBuffer_.clear();
     lastStderrLine_.clear();
@@ -436,7 +355,7 @@ bool AdbProcess::start()
             onErrorOccurred( QProcess::Timedout );
             endProcesses( { this } );
         }
-        discardLogFile();
+        logFile_.discard();
         return false;
     }
 
@@ -466,7 +385,7 @@ void AdbProcess::stopAll( const QList<AdbProcess*>& sessions )
     endProcesses( ending );
 
     for ( auto* session : ending ) {
-        session->tempFile_.close();
+        session->logFile_.close();
         hostLog( LOGSQUIRL_LOG_INFO, QString( "Stopped logcat for device %1 (%2 lines captured)" )
                                          .arg( session->serial_ )
                                          .arg( session->counters_.lines ) );
@@ -527,13 +446,7 @@ void AdbProcess::endProcesses( const QList<AdbProcess*>& sessions )
 
 QString AdbProcess::preserveTempFile()
 {
-    // When writing directly to the log directory, the temp dir is unused
-    // and can be auto-removed safely.
-    if ( usingSavePath_ ) {
-        return {};
-    }
-    tempDir_.setAutoRemove( false );
-    return tempDir_.path();
+    return logFile_.keepTempDir();
 }
 
 QString AdbProcess::rotateLog()
@@ -545,56 +458,27 @@ QString AdbProcess::rotateLog()
     // Flush any pending partial line to the old file before rotating
     flushPartialLine();
 
-    // Generate the rotated file path.  When using the log directory,
-    // create a new timestamped file there; otherwise use the temp dir.
-    // Either way the file must be new: opening an existing one would
-    // truncate an earlier capture.
-    QString newPath;
-    if ( usingSavePath_ ) {
-        // The directory start() wrote to: the save path as typed may start with ~.
-        newPath
-            = generateLogPath( QFileInfo( absoluteUserPath( savePath_ ) ).absolutePath(), serial_ );
-    }
-    else {
-        newPath = tempDir_.filePath( QString( "logcat_%1_%2.log" )
-                                         .arg( safeFileName( serial_ ) )
-                                         .arg( rotationCount_ + 1 ) );
-    }
-
-    // Close the old file (it stays on disk for the old tab)
-    const auto oldPath = logPath_;
-    tempFile_.close();
-
-    QString reason;
-    if ( !openLogFile( newPath, QIODevice::WriteOnly | QIODevice::NewOnly, reason ) ) {
-
-        // Keep capturing into the old file: a session left running with a
-        // closed file would silently drop everything from here on.
-        QString reopenError;
-        if ( openLogFile( oldPath, QIODevice::WriteOnly | QIODevice::Append, reopenError ) ) {
-            Q_EMIT errorOccurred( QString( "Could not rotate the log to %1 (%2); "
-                                           "still writing to %3." )
-                                      .arg( newPath, reason, oldPath ) );
-        }
-        else {
-            Q_EMIT errorOccurred( QString( "Could not rotate the log to %1 (%2), nor reopen "
-                                           "%3 (%4); logcat stopped." )
-                                      .arg( newPath, reason, oldPath, reopenError ) );
-            stop();
-        }
+    QString error;
+    switch ( logFile_.rotate( error ) ) {
+    case LogFile::Rotation::Rotated:
+        break;
+    case LogFile::Rotation::KeptOldFile:
+        Q_EMIT errorOccurred( error );
+        return {};
+    case LogFile::Rotation::Closed:
+        Q_EMIT errorOccurred( error + "; logcat stopped." );
+        stop();
         return {};
     }
 
-    ++rotationCount_;
-    lineCount_ = 0;
     ++counters_.rotations;
     counters_.fileBytes = 0;
 
     hostLog( LOGSQUIRL_LOG_INFO, QString( "Rotated logcat log for %1 (rotation #%2)" )
                                      .arg( serial_ )
-                                     .arg( rotationCount_ ) );
+                                     .arg( counters_.rotations ) );
 
-    return newPath;
+    return logFile_.path();
 }
 
 bool AdbProcess::isRunning() const
@@ -602,23 +486,18 @@ bool AdbProcess::isRunning() const
     return process_->state() != QProcess::NotRunning;
 }
 
-QString AdbProcess::tempFilePath() const
-{
-    return logPath_;
-}
-
 // ── Private helpers ─────────────────────────────────────────────────────
 
 bool AdbProcess::writeLine( const QByteArray& line )
 {
-    if ( writeFailed_ ) {
+    // A failure is reported once; the session stops after it.
+    if ( logFile_.failed() ) {
         return false;
     }
-    if ( tempFile_.write( line ) != line.size() || tempFile_.write( "\n", 1 ) != 1 ) {
+    if ( !logFile_.writeLine( line ) ) {
         failWrite();
         return false;
     }
-    ++lineCount_;
     const auto written = line.size() + 1;
     ++counters_.lines;
     counters_.bytes += written;
@@ -628,10 +507,10 @@ bool AdbProcess::writeLine( const QByteArray& line )
 
 bool AdbProcess::flushLogFile()
 {
-    if ( writeFailed_ ) {
+    if ( logFile_.failed() ) {
         return false;
     }
-    if ( !tempFile_.flush() ) {
+    if ( !logFile_.flush() ) {
         failWrite();
         return false;
     }
@@ -640,84 +519,17 @@ bool AdbProcess::flushLogFile()
 
 void AdbProcess::failWrite()
 {
-    if ( writeFailed_ ) {
+    // No file open (a Rotate that could open none) is not a write failure:
+    // the session is stopping already.
+    if ( !logFile_.failed() ) {
         return;
     }
-    writeFailed_ = true;
-    Q_EMIT errorOccurred( QString( "Could not write the log file %1 (%2); logcat stopped." )
-                              .arg( logPath_, tempFile_.errorString() ) );
+    Q_EMIT errorOccurred( logFile_.failure() + "; logcat stopped." );
     // Not from inside the slot that is reading adb's output.
     QMetaObject::invokeMethod(
         this,
         [ this ]() { guarded( "stopping a capture whose log file failed", [ this ] { stop(); } ); },
         Qt::QueuedConnection );
-}
-
-bool AdbProcess::openLogFile( const QString& path, QIODevice::OpenMode mode, QString& error )
-{
-    tempFile_.setFileName( path );
-#ifdef Q_OS_UNIX
-    // One open that cannot block on a FIFO nor follow a symlink, then a
-    // check of what was opened: a check before the open could be raced.
-    int flags = O_WRONLY | O_CREAT | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC;
-    flags |= mode.testFlag( QIODevice::NewOnly ) ? O_EXCL : 0;
-    flags |= mode.testFlag( QIODevice::Append ) ? O_APPEND : 0;
-    const int fd = ::open( QFile::encodeName( path ).constData(), flags, S_IRUSR | S_IWUSR );
-    if ( fd < 0 ) {
-        // A FIFO without a reader (ENXIO) and a symlink (ELOOP) are what
-        // the flags refuse; anything else is the system's own reason.
-        if ( errno == ENXIO ) {
-            error = QStringLiteral( "not a regular file" );
-        }
-        else if ( errno == ELOOP ) {
-            error = QStringLiteral( "a symbolic link, not a regular file" );
-        }
-        else {
-            error = QString::fromLocal8Bit( std::strerror( errno ) );
-        }
-        return false;
-    }
-    struct stat info{};
-    if ( ::fstat( fd, &info ) != 0 || !S_ISREG( info.st_mode ) ) {
-        ::close( fd );
-        error = QStringLiteral( "not a regular file" );
-        return false;
-    }
-    // A regular file never blocks; the flag only kept the open from waiting.
-    ::fcntl( fd, F_SETFL, ::fcntl( fd, F_GETFL ) & ~O_NONBLOCK );
-    if ( !tempFile_.open( fd, mode & ~QIODevice::NewOnly, QFileDevice::AutoCloseHandle ) ) {
-        ::close( fd );
-        error = tempFile_.errorString();
-        return false;
-    }
-    logPath_ = path;
-    return true;
-#else
-    const QFileInfo info( path );
-    if ( info.isSymLink() || ( info.exists() && !info.isFile() ) ) {
-        error = QStringLiteral( "not a regular file" );
-        return false;
-    }
-    if ( !tempFile_.open( mode ) ) {
-        error = tempFile_.errorString();
-        return false;
-    }
-    if ( mode.testFlag( QIODevice::NewOnly ) || !info.exists() ) {
-        tempFile_.setPermissions( QFileDevice::ReadOwner | QFileDevice::WriteOwner );
-    }
-    logPath_ = path;
-    return true;
-#endif
-}
-
-void AdbProcess::discardLogFile()
-{
-    tempFile_.close();
-    if ( createdLogFile_ && !logPath_.isEmpty() ) {
-        QFile::remove( logPath_ );
-    }
-    tempFile_.setFileName( {} );
-    logPath_.clear();
 }
 
 void AdbProcess::flushPartialLine()
@@ -775,7 +587,7 @@ void AdbProcess::onFinished( int exitCode, QProcess::ExitStatus exitStatus )
     // Flush any remaining partial line in the buffer
     flushPartialLine();
 
-    tempFile_.close();
+    logFile_.close();
 
     // Collect what adb wrote to stderr just before it exited, including a
     // last line without a terminator

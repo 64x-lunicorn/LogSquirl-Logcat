@@ -23,6 +23,7 @@
  */
 
 #include "devicestore.h"
+#include "logfile.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -166,13 +167,13 @@ QString DeviceStore::savePathFor( const QString& serial ) const
     // Ensure the directory exists.  A relative one is left as it is:
     // AdbProcess::start() refuses it with a message, rather than create it
     // in LogSquirl's working directory.
-    if ( const auto absolute = AdbProcess::absoluteUserPath( dir ); !absolute.isEmpty() ) {
+    if ( const auto absolute = LogFile::absoluteUserPath( dir ); !absolute.isEmpty() ) {
         dir = absolute;
         QDir().mkpath( dir );
     }
 
     // Format: YYYY-MM-dd_HHmmss_<serial>.log
-    return AdbProcess::generateLogPath( dir, serial );
+    return LogFile::generateLogPath( dir, serial );
 }
 
 void DeviceStore::write( const QList<KnownDevice>& devices )

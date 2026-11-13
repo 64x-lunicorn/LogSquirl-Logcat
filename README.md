@@ -327,6 +327,8 @@ logsquirl-logcat/
 │   ├── adbprocess.cpp
 │   ├── devicescan.h            # Device scan (adb devices -l) behind a port, QProcess adapter
 │   ├── devicescan.cpp
+│   ├── logfile.h               # The file a Session writes: open, write, Rotate, temp dir
+│   ├── logfile.cpp
 │   ├── sessions.h              # Sessions (start/stop/rotate, counters)
 │   ├── sessions.cpp
 │   ├── devicewidget.h          # The Android Logcat dialog, a view of the scan and Sessions
@@ -354,6 +356,7 @@ logsquirl-logcat/
 │   ├── devicescan_test.cpp     # The device scan, its runs completed by the test
 │   ├── fakeadbdevices.h        # The scan's test adapter: a test ends each run
 │   ├── sidebarwidget_test.cpp  # The tab over a fake adb
+│   ├── logfile_test.cpp        # The log file on real temp files, without adb
 │   └── adbprocess_test.cpp
 └── docs/
     └── DEVELOPER_GUIDE.md      # How to use this as a plugin template
