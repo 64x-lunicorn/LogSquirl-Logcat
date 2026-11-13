@@ -214,7 +214,8 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init_ex( const LogSquirlHostApi* ap
         // The devices and their sessions, which the dialog and the sidebar
         // show.  Creating the scan starts the first device scan; a new ADB
         // path starts it again.
-        logcat::g_state.scan = new logcat::DeviceScan( logcat::g_state.settings );
+        logcat::g_state.scan = new logcat::DeviceScan(
+            logcat::g_state.settings, std::exchange( logcat::g_state.devicesRunner, nullptr ) );
         logcat::g_state.sessions = new logcat::Sessions( logcat::g_state.settings );
         // adb exits when its device goes away: find out whether it did.
         QObject::connect(
@@ -315,6 +316,8 @@ LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void )
         guarded( "shutdown", [] { delete logcat::g_state.store; } );
         st.store = nullptr;
     }
+    // A runner for a scan that init() failed before creating (tests only).
+    delete std::exchange( st.devicesRunner, nullptr );
     // Last: everything above reads it.
     if ( st.settings ) {
         guarded( "shutdown", [] { delete logcat::g_state.settings; } );

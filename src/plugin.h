@@ -45,6 +45,7 @@
 #include <utility>
 
 namespace logcat {
+class AdbDevicesRunner;
 class DeviceScan;
 class DeviceStore;
 class DeviceWidget;
@@ -79,6 +80,9 @@ struct PluginState {
     bool initialised = false; ///< True between init() and shutdown().
     bool quitting = false; ///< LogSquirl is quitting (aboutToQuit), not just unloading the plugin.
     QString tempRoot;      ///< Where temporary directories go; empty: the system's (for tests).
+    /// For tests: the runner that the next init() gives its DeviceScan, which
+    /// takes it (and init() clears this); null: adb runs in a QProcess.
+    AdbDevicesRunner* devicesRunner = nullptr;
 };
 
 /// Singleton plugin state.  Defined in plugin.cpp.

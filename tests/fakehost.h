@@ -164,8 +164,16 @@ private:
     LogSquirlHostApi api_{};
 };
 
+/**
+ * How long waitFor() waits at most by default: what a real process (a fake
+ * adb run through QProcess) may take on a heavily loaded machine, far more
+ * than it takes on an idle one.  waitFor() returns as soon as its
+ * condition holds, so only a failing test waits this long.
+ */
+constexpr int kWaitTimeoutMs = 60000;
+
 /** Run the event loop until @p condition holds or @p timeoutMs passes. */
-inline bool waitFor( const std::function<bool()>& condition, int timeoutMs = 5000 )
+inline bool waitFor( const std::function<bool()>& condition, int timeoutMs = kWaitTimeoutMs )
 {
     QElapsedTimer timer;
     timer.start();

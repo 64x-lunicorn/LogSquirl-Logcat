@@ -84,6 +84,16 @@ public:
         list( listing( serial ) );
     }
 
+    /// End the running run, and any run that its end starts (a refresh
+    /// folded into it), each listing @p output.
+    void settle( const QByteArray& output )
+    {
+        REQUIRE( running_ );
+        while ( running_ ) {
+            list( output );
+        }
+    }
+
     /// End the running run: it failed with @p message.
     void fail( const QString& message )
     {
