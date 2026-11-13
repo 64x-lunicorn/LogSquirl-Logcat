@@ -53,6 +53,45 @@
 
 namespace logcat {
 
+/// What a logcat session has captured since start(), as AdbProcess::counters()
+/// reads it.
+struct SessionCounters {
+    qint64 lines = 0;     ///< Lines written since start(), over all of its files.
+    qint64 bytes = 0;     ///< Bytes written since start(), newlines included, over all files.
+    qint64 fileBytes = 0; ///< Size of the current file, with what a save path held before.
+    int rotations = 0;    ///< How often the log was rotated since start().
+    /// Size of the current file at which it rotates next; 0: only when
+    /// asked to (rotateLog()), as logcat has no size limit.
+    qint64 nextRotationBytes = 0;
+    QDateTime startTime; ///< When start() launched adb; null before.
+};
+
+/// A device as `adb devices -l` lists it (AdbProcess::parseDevices()).
+struct Device {
+    QString serial; ///< E.g. "emulator-5554", "3A1B2C3D4E5F" or "192.168.1.5:5555".
+    /// As adb says it: "device" (connected, and USB debugging allowed),
+    /// "unauthorized", "offline", "no permissions", "recovery", …
+    QString state;
+    /// E.g. "Pixel 8"; empty when adb names none (an unauthorized or offline
+    /// device, or the short format of `adb devices`).
+    QString model;
+
+    /// Whether logcat can run on it: its state is "device".
+    bool isReady() const
+    {
+        return state == QLatin1String( "device" );
+    }
+
+    bool operator==( const Device& other ) const
+    {
+        return serial == other.serial && state == other.state && model == other.model;
+    }
+    bool operator!=( const Device& other ) const
+    {
+        return !( *this == other );
+    }
+};
+
 /**
  * Manages a single `adb logcat` process for one device.
  *
@@ -100,6 +139,14 @@ public:
      */
     static QString findAdb();
 
+    /// The ADB path the user set (logcat.ini → adb/path); empty for
+    /// auto-detection, and without a config directory.
+    static QString adbPathOverride();
+
+    /// Save @p path as the ADB path; empty for auto-detection.  False if
+    /// there is no config directory to save it in.
+    static bool setAdbPathOverride( const QString& path );
+
     /**
      * Parse the raw output of `adb devices` into a list of device serials.
      *
@@ -110,10 +157,22 @@ public:
      * Extracted as a static helper so unit tests can exercise the parsing
      * logic without running a real ADB process.
      *
-     * @param output  Raw stdout bytes from `adb devices`.
+     * @param output  Raw stdout bytes from `adb devices` or `adb devices -l`.
      * @return List of serials with status "device".
      */
     static QStringList parseDeviceList( const QByteArray& output );
+
+    /**
+     * Parse the raw output of `adb devices -l` (or of `adb devices`) into
+     * every device it lists, in any state, in its order.  The columns may
+     * be separated by a tab (short format) or by spaces (long format); a
+     * model is read from the long format's `model:` field, with spaces for
+     * the underscores adb writes.
+     *
+     * @param output  Raw stdout bytes from `adb devices -l`.
+     * @return The devices, in the order adb lists them.
+     */
+    static QList<Device> parseDevices( const QByteArray& output );
 
     /**
      * Remove every complete line from the front of @p buffer and return
@@ -153,6 +212,10 @@ public:
      * the plugin is not initialised: callers then use no configuration.
      */
     static QString configDir();
+
+    /// The plugin's settings file, logcat.ini in configDir() (the ADB path,
+    /// and devicestore.h); empty without a config directory.
+    static QString settingsFile();
 
     /**
      * The path a user typed, made absolute: a leading `~` is the home
@@ -255,10 +318,16 @@ public:
         return usingSavePath_;
     }
 
-    /** Total number of lines captured so far. */
+    /** Number of lines in the current file: it starts from 0 on each rotation. */
     qint64 lineCount() const
     {
         return lineCount_;
+    }
+
+    /** What the session has captured since start(), read live. */
+    SessionCounters counters() const
+    {
+        return counters_;
     }
 
 Q_SIGNALS:
@@ -334,7 +403,8 @@ private:
     QByteArray stderrBuffer_; ///< Accumulates partial lines from stderr, cut at kMaxLineBytes.
     QString lastStderrLine_;  ///< Last line adb wrote to stderr.
     qint64 lineCount_ = 0;
-    int rotationCount_ = 0;       ///< Incremented on each rotateLog() call.
+    SessionCounters counters_;    ///< Since start(); counters_.rotations counts rotateLog().
+    int rotationCount_ = 0;       ///< Incremented on each rotateLog() call; names the files.
     bool usingSavePath_ = false;  ///< True when writing directly to the log directory.
     bool createdLogFile_ = false; ///< True when start() created the log file.
     bool stopping_ = false;       ///< True while stop() ends the process.

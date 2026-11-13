@@ -19,113 +19,194 @@
 
 /**
  * @file sidebarwidget.h
- * @brief Sidebar panel for ADB logcat session management.
+ * @brief The plugin's tab "Logcat" in LogSquirl's sidebar: one tile per device.
  *
- * This widget is registered as a tab in the LogSquirl sidebar via the
- * host API's register_sidebar_tab().  It provides:
+ *   [Settings…]                    [■ Stop all]
+ *   ┌ tile: Pixel 8 · 3A1B… ────────────────┐   connected or running
+ *   └───────────────────────────────────────┘
+ *   ┌ tile: Galaxy S23 · R5CR… ─────────────┐   unplugged: greyed, Forget
+ *   └───────────────────────────────────────┘
  *
- *   - Device combo box with refresh button
- *   - Start / Stop capture buttons
- *   - Active sessions list showing device serial, line count, and
- *     per-session Rotate / Stop buttons
- *   - A "Stop All" button
+ * One tile (devicetile.h) per device: each device adb lists, in any state,
+ * and each device seen before (devicestore.h), which stays while it is
+ * unplugged — greyed out, Start disabled, with Forget — until it is
+ * forgotten; also a device that runs a session adb no longer lists.
+ * Devices seen before come first, in the order they were first seen.  A
+ * tile is titled by the device's model and serial (deviceTitle()) and says
+ * whether the device is connected, running, unauthorized, offline or
+ * disconnected, and where it saves.
  *
- * The panel delegates session management to the DeviceWidget (which also
- * remains available as a standalone dialog via the Plugins menu).  Both
- * the sidebar and the dialog share the same underlying sessions_ map
- * inside DeviceWidget.
+ * Start runs logcat for the device (sessions.h), followed in a new tab,
+ * writing to the device's own save path or else to a new file in the log
+ * directory; Stop ends it, its tab keeping the file; ↻ Rotate goes on in a
+ * new file and tab.  Several devices run at once.  Save to… on a tile sets
+ * the device's own save path; Settings… opens the settings dialog
+ * (settingsdialog.h): the log directory and the ADB path.
+ *
+ * While the tab shows, the devices are rescanned every kScanIntervalMs, so
+ * that a device plugged in or unplugged shows by itself; they are scanned
+ * once right as it is shown, and not while it is hidden.  A scan or a
+ * session that starts, stops or rotates updates the tiles at once.
+ *
+ * A running tile shows its session's details (sessionDetails()): running
+ * time and lines per second, lines and bytes, the current file's size and
+ * the rotations so far, and when it rotates next — on request, as logcat
+ * has no size limit.  A session's lines emit no signal, so the counters are
+ * polled every kCounterPollMs (pollCounters()) while the tab shows, and
+ * right as it is shown, the lines per second
+ * measured between two polls, as LogSquirl-NATS's tiles do.  A stopped tile
+ * shows only the device.
+ *
+ * Children named for tests: "settings", "stopAll", "empty" (the hint shown
+ * without a tile), "deviceScan" (the rescan timer), "counterPoll" (the
+ * counters' timer), the tiles ("tile"), and
+ * while it is open the dialog of a tile's Save to… ("savePathDialog", with
+ * the line edit "savePath").
+ *
+ * OWNERSHIP
+ * ─────────
+ * Created by logsquirl_plugin_init() and registered with
+ * register_sidebar_tab; the host parents it.  logsquirl_plugin_shutdown()
+ * unregisters and deletes it, before the sessions and the store it shows.
  */
 
 #pragma once
 
-#include "adbprocess.h"
-
-#include <QComboBox>
-#include <QLabel>
-#include <QLineEdit>
-#include <QListWidget>
-#include <QPushButton>
-#include <QTimer>
+#include <QElapsedTimer>
+#include <QHash>
+#include <QString>
+#include <QStringList>
 #include <QWidget>
+
+class QDateTime;
+class QHideEvent;
+class QLabel;
+class QPushButton;
+class QShowEvent;
+class QTimer;
+class QVBoxLayout;
 
 namespace logcat {
 
-class DeviceWidget;
+class DeviceStore;
+class DeviceTile;
+class Sessions;
+struct Device;
+struct KnownDevice;
+struct SessionCounters;
 
 /**
- * Sidebar panel widget for logcat session control.
- *
- * Embeds device selection and an active-sessions list.  All actual
- * session logic is delegated to DeviceWidget so that the dialog
- * and the sidebar stay in sync.
+ * The title of a device's tile: "<model> · <serial>", e.g.
+ * "Pixel 8 · 3A1B…".  A serial longer than 8 characters is cut after its
+ * first 4 (the summary shows it whole); without a model, the serial alone,
+ * whole.
  */
+QString deviceTitle( const QString& serial, const QString& model );
+
+/// @p count with its thousands separated by commas, e.g. "12,345".
+QString formatCount( qint64 count );
+
+/// @p bytes in bytes below 1 KB ("512 B"), else to a tenth of the largest
+/// unit of 1024 it reaches, up to TB: "1.0 KB", "1.2 MB".
+QString formatSize( qint64 bytes );
+
+/// @p seconds as "m:ss", or "h:mm:ss" from an hour on: "0:05", "1:02:03".
+/// Less than 0 is "0:00".
+QString formatDuration( qint64 seconds );
+
+/// How many per second @p count in @p elapsedMs milliseconds is, rounded
+/// down; 0 for a count below 0 or no time.
+qint64 ratePerSecond( qint64 count, qint64 elapsedMs );
+
+/**
+ * The details of a running session for its tile, at @p now:
+ *
+ *   running 1:02:03 · 120 lines/s     time since start, lines per second
+ *   12,345 lines · 1.2 MB             since start, over all its files
+ *   file 512.0 KB · 2 rotations       the current file, rotations so far
+ *   rotates on request                when it rotates next
+ *
+ * @p linesPerSecond is the rate the caller measured.  "rotates on request":
+ * a logcat session rotates only on ↻ Rotate; a session that rotated at a
+ * size (SessionCounters::nextRotationBytes) would say "rotates at 10.0 MB".
+ */
+QStringList sessionDetails( const SessionCounters& counters, qint64 linesPerSecond,
+                            const QDateTime& now );
+
 class SidebarWidget : public QWidget {
     Q_OBJECT
 
 public:
+    /// How often the devices are rescanned, in milliseconds.
+    static constexpr int kScanIntervalMs = 3000;
+
+    /// How often a running tile's counters are polled, in milliseconds.
+    static constexpr int kCounterPollMs = 1000;
+
+    /// Shows the devices of @p store and @p sessions, and the sessions of
+    /// @p sessions, which must both outlive it.
+    SidebarWidget( DeviceStore* store, Sessions* sessions, QWidget* parent = nullptr );
+
+    /// Show the devices and sessions as they are now.
+    void reload();
+
     /**
-     * Construct the sidebar panel.
-     *
-     * @param deviceWidget  Shared DeviceWidget that owns the sessions.
-     *                      Must outlive this widget.
-     * @param parent        QWidget parent.
+     * Read the counters of the running sessions, and show them on their
+     * tiles, with the lines per second since the poll before (0 at the
+     * first poll of a session).  The timer "counterPoll" calls it every
+     * kCounterPollMs; tests call it themselves.
      */
-    explicit SidebarWidget( DeviceWidget* deviceWidget, QWidget* parent = nullptr );
+    void pollCounters();
 
-private Q_SLOTS:
-    /** Re-scan for ADB devices (in the background, see DeviceWidget). */
-    void refreshDevices();
+protected:
+    /// Scan the devices and poll the counters at once, then start the
+    /// timers that do it again.
+    void showEvent( QShowEvent* event ) override;
 
-    /** Refill the device combo box and the sessions list. */
-    void updateDeviceList();
-
-    /** Start logcat for the currently selected device. */
-    void startCapture();
-
-    /** Stop logcat for the currently selected device. */
-    void stopSelectedCapture();
-
-    /** Stop all active sessions. */
-    void stopAllCaptures();
-
-    /** Periodic refresh of the active-sessions list (line counts). */
-    void refreshSessionList();
+    /// Stop the timers: a hidden tab scans and polls nothing.
+    void hideEvent( QHideEvent* event ) override;
 
 private:
-    /** Build or rebuild the sessions list widget contents. */
-    void rebuildSessionList();
+    /// The lines of a running session at the poll before, to measure its
+    /// rate by.
+    struct Sample {
+        qint64 lines = 0;    ///< Its lines at that poll.
+        qint64 rate = 0;     ///< Lines per second between that poll and the one before.
+        QElapsedTimer since; ///< Started at that poll.
+    };
 
-    /** Return the serial of the currently selected combo box item. */
-    QString currentSerial() const;
+    /// Show on @p tile the details of its session, if it runs, else none.
+    void updateDetails( DeviceTile* tile );
 
-    /** Update button enabled/disabled states. */
-    void updateUiState();
+    /// Start logcat for @p serial, if it is ready.
+    void start( const QString& serial );
 
-    /** Generate a save path for a new session based on log directory and device serial. */
-    QString generateSavePath( const QString& serial ) const;
+    /// Open the dialog that sets the save path of @p serial.
+    void editSavePath( const QString& serial );
 
-    /** Load the persisted log directory from plugin config. */
-    void loadLogDir();
+    /// Open the settings dialog.
+    void openSettings();
 
-    /** Persist the log directory to plugin config. */
-    void saveLogDir();
+    /// Remember the attached devices, and show them.
+    void onDevicesChanged();
 
-    // ── Shared state ─────────────────────────────────────────────────
-    DeviceWidget* deviceWidget_ = nullptr;
+    /// The tile of @p serial, created (and connected) if it has none.
+    DeviceTile* tileFor( const QString& serial );
 
-    // ── UI elements ──────────────────────────────────────────────────
-    QComboBox* deviceCombo_ = nullptr;
-    QPushButton* refreshButton_ = nullptr;
-    QPushButton* startButton_ = nullptr;
-    QPushButton* stopButton_ = nullptr;
-    QPushButton* stopAllButton_ = nullptr;
-    QLineEdit* logDirEdit_ = nullptr;
-    QPushButton* logDirBrowseButton_ = nullptr;
-    QListWidget* sessionList_ = nullptr;
-    QLabel* statusLabel_ = nullptr;
+    /// Show on @p tile what its device is and does; @p attached is how adb
+    /// lists it (nullptr: not), @p known how the store remembers it.
+    void updateTile( DeviceTile* tile, const Device* attached, const KnownDevice* known );
 
-    // ── Periodic refresh ─────────────────────────────────────────────
-    QTimer* refreshTimer_ = nullptr;
+    DeviceStore* store_;
+    Sessions* sessions_;
+    QPushButton* stopAll_;
+    QLabel* empty_;
+    QVBoxLayout* tiles_;
+    QTimer* scanTimer_;
+    QTimer* pollTimer_;
+    QHash<QString, DeviceTile*> tileBySerial_;
+    /// The running sessions' samples, by serial.
+    QHash<QString, Sample> samples_;
 };
 
 } // namespace logcat

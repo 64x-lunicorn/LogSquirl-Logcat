@@ -21,7 +21,11 @@ add_executable(logsquirl_logcat_tests
     adbprocess_test.cpp
     hostapi_test.cpp
     takelines_test.cpp
+    sessions_test.cpp
     devicewidget_test.cpp
+    devicestore_test.cpp
+    devicetile_test.cpp
+    sidebarwidget_test.cpp
     generatelogpath_test.cpp
     plugin_test.cpp
     presets_test.cpp
@@ -34,7 +38,7 @@ set_target_properties(logsquirl_logcat_tests PROPERTIES
 target_include_directories(logsquirl_logcat_tests
     PRIVATE
         "${CMAKE_SOURCE_DIR}/include"   # logsquirl_plugin_api.h
-        "${CMAKE_SOURCE_DIR}/src"       # plugin.h, adbprocess.h, devicewidget.h
+        "${CMAKE_SOURCE_DIR}/src"       # plugin.h, adbprocess.h, sessions.h, …
 )
 
 # Link against the same Qt6 modules and Catch2.
@@ -54,8 +58,12 @@ target_sources(logsquirl_logcat_tests
         "${CMAKE_SOURCE_DIR}/src/plugin.cpp"
         "${CMAKE_SOURCE_DIR}/src/adbprocess.cpp"
         "${CMAKE_SOURCE_DIR}/src/tempdirs.cpp"
+        "${CMAKE_SOURCE_DIR}/src/sessions.cpp"
         "${CMAKE_SOURCE_DIR}/src/devicewidget.cpp"
         "${CMAKE_SOURCE_DIR}/src/sidebarwidget.cpp"
+        "${CMAKE_SOURCE_DIR}/src/devicestore.cpp"
+        "${CMAKE_SOURCE_DIR}/src/devicetile.cpp"
+        "${CMAKE_SOURCE_DIR}/src/settingsdialog.cpp"
 )
 
 # Where presets_test.cpp finds the files the plugin ships.

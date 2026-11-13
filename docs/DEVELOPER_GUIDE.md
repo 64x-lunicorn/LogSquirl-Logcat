@@ -322,20 +322,75 @@ classDiagram
     class PluginState {
         +LogSquirlHostApi* api
         +void* handle
+        +Sessions* sessions
+        +DeviceStore* store
         +DeviceWidget* dialog
+        +SidebarWidget* sidebarWidget
         +bool initialised
+    }
+
+    class Sessions {
+        -map~QString, AdbProcess*~ sessions_
+        -QProcess* scanProcess_
+        +devices() QStringList
+        +attachedDevices() QList~Device~
+        +refreshDevices()
+        +startSession(serial, savePath) bool
+        +stopSession(serial)
+        +rotateSession(serial)
+        +stopAll()
+        +counters(serial) SessionCounters
+        sessionStarted(serial)
+        sessionStopped(serial)
+        sessionChanged(serial)
     }
 
     class DeviceWidget {
         -QComboBox* deviceCombo_
         -QPushButton* startButton_
         -QPushButton* stopButton_
-        -map~QString, AdbProcess*~ sessions_
-        -QProcess* scanProcess_
-        +refreshDevices()
-        +startCapture()
-        +stopCapture()
-        +stopAll()
+        -Sessions* sessions_
+        -startCapture()
+        -stopCapture()
+    }
+
+    class SidebarWidget {
+        -QHash~QString, DeviceTile*~ tileBySerial_
+        -QTimer* scanTimer_
+        -QTimer* pollTimer_
+        -Sessions* sessions_
+        -DeviceStore* store_
+        +reload()
+        +pollCounters()
+    }
+
+    class DeviceTile {
+        +serial() QString
+        +setTitle(title)
+        +setSummary(lines)
+        +setDetails(lines)
+        +setState(TileState)
+        startClicked()
+        stopClicked()
+        rotateClicked()
+        savePathClicked()
+        forgetClicked()
+    }
+
+    class DeviceStore {
+        +list() QList~KnownDevice~
+        +remember(attached)
+        +forget(serial)
+        +setSavePath(serial, path)
+        +logDir() QString
+        +savePathFor(serial) QString
+        changed()
+    }
+
+    class SettingsDialog {
+        -QLineEdit* logDir_
+        -QLineEdit* adbPath_
+        +accept()
     }
 
     class AdbProcess {
@@ -347,13 +402,78 @@ classDiagram
         +stop()
         +preserveTempFile()
         +tempFilePath() QString
+        +parseDevices(QByteArray)$ QList~Device~
         +parseDeviceList(QByteArray)$ QStringList
         +findAdb()$ QString
     }
 
+    PluginState --> Sessions : sessions
+    PluginState --> DeviceStore : store
     PluginState --> DeviceWidget : dialog
-    DeviceWidget --> AdbProcess : sessions_ (0..N)
+    PluginState --> SidebarWidget : sidebarWidget
+    DeviceWidget --> Sessions : view of
+    SidebarWidget --> Sessions : view of
+    SidebarWidget --> DeviceStore : view of
+    SidebarWidget --> DeviceTile : one per device
+    SidebarWidget --> SettingsDialog : Settings…
+    Sessions --> AdbProcess : sessions_ (0..N)
 ```
+
+### The sidebar tab: one tile per device
+
+The **Logcat** tab (`sidebarwidget.h`) shows one tile (`devicetile.h`) per
+device — the card of LogSquirl-NATS's connection tiles, except that a tile
+stands for a device, not for a saved configuration:
+
+- **Which devices.** Every device `adb devices -l` lists, in any state
+  (`Sessions::attachedDevices()`, parsed by `AdbProcess::parseDevices()`),
+  and every device seen before (`DeviceStore`, the array `devices` in
+  `logcat.ini`), first seen first. While it is shown, the tab rescans every
+  `SidebarWidget::kScanIntervalMs` (3 s), so a device plugged in or unplugged
+  shows by itself; it scans once right as it is shown (`showEvent()`) and not
+  while it is hidden (`hideEvent()`). The scan logs the devices only when they
+  changed, and a failure once, until it changes or a scan succeeds.
+- **What a tile says.** Its title is `<model> · <serial>`
+  (`deviceTitle()`: `Pixel 8 · 3A1B…`, a serial longer than 8 characters cut
+  after 4, the summary showing it whole). Its dot and summary say whether the
+  device is running, connected, unauthorized, offline (or another state adb
+  names, such as `no permissions`) or disconnected. An unplugged device's
+  tile is greyed out, with **Forget**.
+- **What it does.** **Start** (only while connected) runs logcat into the
+  device's own save path or a new file in the log directory
+  (`DeviceStore::savePathFor()`), **Stop** ends it, **↻ Rotate** (while it
+  runs) goes on in a new file and tab, **Save to…** sets the device's own save
+  path. **Settings…** in the tab opens `SettingsDialog`: the log directory and
+  the ADB path.
+- **Kept, not rebuilt.** `reload()` adds, removes, reorders and updates the
+  tiles, so a rescan does not rebuild them under the mouse.
+- **A running tile's details.** Below a separator (`DeviceTile::setDetails()`)
+  a running tile shows its session's counters (`Sessions::counters()`), as
+  `sessionDetails()` writes them:
+
+  ```
+  running 1:02:03 · 120 lines/s     time since Start, lines per second
+  12,345 lines · 1.2 MB             since Start, over all its files
+  file 512.0 KB · 2 rotations       the current file, rotations so far
+  rotates on request                when it rotates next
+  ```
+
+  A session's lines emit no signal, so the tab polls the counters every
+  `SidebarWidget::kCounterPollMs` (1 s, the timer `counterPoll`,
+  `pollCounters()`) while it is shown, and right as it is shown; the lines per second are those between two polls (0 at a
+  session's first poll), as in LogSquirl-NATS's tiles. Logcat has no size
+  limit, so the next rotation is "on request" (**↻ Rotate**); were
+  `SessionCounters::nextRotationBytes` set, it would say at which size. Sizes
+  are in units of 1024 to a tenth (`formatSize()`: `1.2 MB`), durations
+  `m:ss` or `h:mm:ss` (`formatDuration()`), counts with commas
+  (`formatCount()`); these are pure functions, tested on their own. A stopped
+  tile shows only the device.
+
+The tile knows nothing of adb: it is tested on its own through its named
+children (`devicetile_test.cpp`), the tab through the tiles over a fake adb
+whose device list the test rewrites (`sidebarwidget_test.cpp`); the counters
+are tested over a fake adb that prints more lines when told to, the test
+calling `pollCounters()` itself where it measures a rate.
 
 ### When to use a UI plugin
 

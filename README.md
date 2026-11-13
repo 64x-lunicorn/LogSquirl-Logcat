@@ -40,9 +40,9 @@ viewer where your other logs already are.
 | Less setup | More signal |
 | :--- | :--- |
 | **Finds `adb` itself.** Looks in `ANDROID_HOME`, `ANDROID_SDK_ROOT`, `PATH` and the usual platform locations; override it in the settings dialog. | **Every device its own tab.** Start as many as you like — each opens in follow mode and keeps streaming. |
-| **Devices found for you.** Automatic ADB scanning with one-click refresh. | **Nothing lost on stop.** Captured output stays in the tab after the session ends. |
-| **Written to disk.** Configurable log directory, automatic `YYYY-MM-dd_HHmmss_<serial>.log` names, path remembered. | **Filter with the host.** No filter UI of its own — LogSquirl's regex search and highlighters do it better. |
-| **Sessions in the sidebar.** Device dropdown, start/stop, and a live list with rotate and stop per session. | **A worked example.** Heavily commented reference implementation for the Plugin SDK. |
+| **Devices found for you.** A device you plug in gets its tile in the sidebar by itself; devices seen before stay until you forget them. | **Nothing lost on stop.** Captured output stays in the tab after the session ends. |
+| **Written to disk.** Configurable log directory, automatic `YYYY-MM-dd_HHmmss_<serial>.log` names, or a save path per device. | **Filter with the host.** No filter UI of its own — LogSquirl's regex search and highlighters do it better. |
+| **One tile per device.** Start, stop and rotate from the device's tile, which shows whether it is connected, unauthorized or offline, and while it runs, its lines, bytes, lines/s and file size, live. | **A worked example.** Heavily commented reference implementation for the Plugin SDK. |
 
 ## Install
 
@@ -84,31 +84,71 @@ After installing, restart LogSquirl or re-scan via *Plugins → Manage Plugins�
    "Android Logcat" and click OK.  (On first run, the plugin is
    auto-enabled if no other plugins are configured.)
 
-2. The **Logcat** sidebar tab appears automatically.  Use the sidebar panel
-   to manage sessions:
+2. The **Logcat** sidebar tab appears automatically, with **one tile per
+   device**.
 
-   - **Device dropdown** — Select a connected ADB device.
-   - **Refresh** — Re-scan for devices.
-   - **Start** — Begin capturing logcat for the selected device.
-     A new tab opens in LogSquirl with live output in follow mode.
-   - **Stop** — Stop the capture for the selected device.
-     The tab remains open with all captured output preserved.
+   <!-- screenshot: docs/images/sidebar.png — the Logcat sidebar tab with
+        three tiles: one running (its details: running time, lines/s, lines,
+        bytes, file size, rotations; ↻ Rotate), one connected, one unplugged
+        (greyed, with Forget). -->
 
-3. **Active Sessions** — Running sessions are listed below the controls.
-   Each session row shows the device name with:
-   - **↻** — Rotate log (close current session, start a new one)
-   - **■** — Stop the session
+   > **Screenshot pending:** the Logcat sidebar tab.
 
-4. **Log directory** — Set a directory path in the "Log Directory" section.
-   Use the **Browse** button or type a path directly.  Log files are
-   automatically named `YYYY-MM-dd_HHmmss_<serial>.log`.
+   - **Plug in a device** (USB debugging on) and its tile appears by
+     itself, titled by model and serial, e.g. `Pixel 8 · 3A1B…`. The devices
+     are rescanned every 3 seconds while the tab is shown.
+   - The tile's dot and summary say whether the device is **connected**,
+     **running**, **unauthorized** (allow USB debugging on the device),
+     **offline** or **disconnected**. Only a connected device can be started.
+   - **Start** — Begin capturing logcat for the device. A new tab opens in
+     LogSquirl with live output in follow mode.
+   - **While it runs**, the tile shows the capture's details, updated every
+     second: how long it runs and the lines per second, the lines and bytes
+     since Start, the size of the current file and how often it was rotated,
+     and when it rotates next (on request: logcat has no size limit). A
+     stopped tile shows only the device.
+   - **Stop** — Stop the capture. The tab remains open with all captured
+     output preserved.
+   - **↻ Rotate** (while it runs) — Go on in a new file, in a new tab; the
+     old tab keeps its file.
+   - **Save to…** — Append this device's logcat to a file of your choice
+     instead of a new file in the log directory at each Start; empty it to
+     use the log directory again.
+   - **Forget** — An unplugged device keeps its tile, greyed out, also after
+     a restart of LogSquirl, until you forget it. Plug it in again and it is
+     back.
+   - **Stop all** — Stop every capture.
 
-5. **Multiple devices** — Select another device, click Start again.
-   Each device gets its own tab and session entry.
+3. **Settings…** in the tab opens the settings dialog:
 
-6. **Configure ADB path** — *Plugins → Manage Plugins…* → select plugin →
-   Configure.  Enter the full path to the `adb` executable (or leave empty
-   for auto-detection).
+   <!-- screenshot: docs/images/settings.png — the Logcat settings dialog
+        with a log directory and the detected adb. -->
+
+   > **Screenshot pending:** the settings dialog.
+
+   - **Log directory** — Where a device without a save path of its own
+     writes, one file per Start, named `YYYY-MM-dd_HHmmss_<serial>.log`.
+     Empty: `logs/` in the plugin's settings directory.
+   - **ADB** — The full path to the `adb` executable, or empty for
+     auto-detection. A new path is used for a device scan right away.
+
+4. **Multiple devices** — Click Start on another tile. Each device gets its
+   own tab and session.
+
+5. **The Android Logcat dialog** — *Plugins → Android Logcat…* opens a
+   dialog with a device list, Start/Stop and a save path; it shows the same
+   sessions as the tab. *Plugins → Manage Plugins…* → select plugin →
+   **Configure** sets the ADB path, as the settings dialog does.
+
+### Screenshots still to take
+
+The screenshots are taken when the tiles are first tried in LogSquirl;
+until then each has a marked placeholder above:
+
+| File | Shows |
+|------|-------|
+| `docs/images/sidebar.png` | The Logcat sidebar tab: a running tile with its details and ↻ Rotate, a connected and an unplugged (greyed) tile |
+| `docs/images/settings.png` | The settings dialog: the log directory and the detected adb |
 
 ### Filters and highlighters
 
@@ -193,18 +233,25 @@ graph TD
 
     subgraph Plugin — C ABI Boundary
         P[plugin.cpp<br/>get_info / init /<br/>shutdown / configure]
-        SW[SidebarWidget<br/>device selector + session list]
-        DW[DeviceWidget<br/>session management]
+        SW[SidebarWidget<br/>one DeviceTile per device]
+        ST[DeviceStore<br/>devices seen before + log directory]
+        DW[DeviceWidget<br/>dialog]
+        S[Sessions<br/>device scan + sessions]
         AP1[AdbProcess #1<br/>emulator-5554]
         AP2[AdbProcess #2<br/>R5CR10XXXXX]
     end
 
     H -- register_sidebar_tab --> P
+    P -- creates --> S
     P -- creates --> SW
-    SW -- uses --> DW
+    P -- creates --> DW
+    P -- creates --> ST
+    SW -- view of --> S
+    SW -- view of --> ST
+    DW -- view of --> S
     SW --> SB
-    DW -- manages --> AP1
-    DW -- manages --> AP2
+    S -- manages --> AP1
+    S -- manages --> AP2
     AP1 -- writes --> TF1[Temp File #1]
     AP2 -- writes --> TF2[Temp File #2]
     TF1 -- open_file follow=1 --> H
@@ -216,28 +263,30 @@ graph TD
 ```mermaid
 sequenceDiagram
     participant User
-    participant DW as DeviceWidget
+    participant SW as SidebarWidget
+    participant S as Sessions
     participant AP as AdbProcess
     participant ADB as adb logcat
     participant TF as Temp File
     participant LS as LogSquirl Tab
 
-    User->>SW: Click Start
-    SW->>DW: startSession(serial)
-    DW->>AP: start()
+    User->>SW: Click Start on a tile
+    SW->>S: startSession(serial, savePath)
+    S->>AP: start()
     AP->>ADB: spawn adb -s SERIAL logcat
     AP->>TF: create temp file
-    AP-->>DW: open_file(tempPath, follow=1)
-    DW-->>LS: New tab opens
+    S-->>LS: open_file(tempPath, follow=1): new tab
+    S-->>SW: sessionStarted(serial)
     loop Streaming
         ADB->>AP: stdout lines
         AP->>TF: write + flush
         LS->>TF: tail/follow reads
     end
-    User->>SW: Click Stop
-    SW->>DW: stopSession(serial)
-    DW->>AP: preserveTempFile() + stop()
+    User->>SW: Click Stop on the tile
+    SW->>S: stopSession(serial)
+    S->>AP: stop() + preserveTempFile()
     AP->>ADB: SIGTERM
+    S-->>SW: sessionStopped(serial)
     Note over LS: Tab stays open with captured output
 ```
 
@@ -247,7 +296,8 @@ sequenceDiagram
 |----------|-----------|
 | **Plugin type = UI** | The DataSource type is limited to 1 stream per plugin. UI type allows managing multiple independent streams. |
 | **open_file() instead of push_line()** | Each device writes to its own temp file. The host opens each file with follow/tail mode → one tab per device. |
-| **register_sidebar_tab()** | Plugin registers a sidebar widget that is always visible while the plugin is loaded. The sidebar contains device selection, session controls, and active session list. |
+| **register_sidebar_tab()** | Plugin registers a sidebar widget that is always visible while the plugin is loaded. The sidebar shows one tile per device, connected or seen before, each with its own controls. |
+| **A tile per device, not per configuration** | A logcat session has hardly any settings: a device's tile is all there is to it, and the few settings (log directory, ADB path) live in a dialog opened from the tab. |
 | **QProcess for ADB** | Cross-platform, integrates with Qt event loop, no need for threading. |
 | **No built-in filtering** | LogSquirl's regex search and highlighters are more powerful than any filter we could build. The plugin only ships ready-made groups for them (`presets/`, named in `plugin.json`). |
 | **Library name without extension** | `plugin.json` uses `"library": "logsquirl_logcat"` — QLibrary resolves the platform suffix automatically. |
@@ -270,16 +320,27 @@ logsquirl-logcat/
 │   ├── plugin.cpp              # C ABI entry points (get_info, init, shutdown)
 │   ├── adbprocess.h            # ADB discovery + per-device QProcess wrapper
 │   ├── adbprocess.cpp
-│   ├── devicewidget.h          # Session management (start/stop/rotate)
+│   ├── sessions.h              # Device scan + sessions (start/stop/rotate, counters)
+│   ├── sessions.cpp
+│   ├── devicewidget.h          # The Android Logcat dialog, a view of Sessions
 │   ├── devicewidget.cpp
-│   ├── sidebarwidget.h         # LogSquirl sidebar tab (device list + controls)
-│   └── sidebarwidget.cpp
+│   ├── sidebarwidget.h         # LogSquirl sidebar tab: one tile per device
+│   ├── sidebarwidget.cpp
+│   ├── devicetile.h            # A device's tile (card): state, Start/Stop, Forget
+│   ├── devicetile.cpp
+│   ├── devicestore.h           # Devices seen before, save paths, log directory
+│   ├── devicestore.cpp
+│   ├── settingsdialog.h        # The tab's settings: log directory, ADB path
+│   └── settingsdialog.cpp
 ├── tests/
 │   ├── CMakeLists.txt          # Catch2 test setup
 │   ├── tests_main.cpp          # QApplication + Catch2 runner
 │   ├── parsedevicelist_test.cpp
 │   ├── plugininfo_test.cpp
 │   ├── presets_test.cpp        # The shipped filter group and highlighter set
+│   ├── devicetile_test.cpp     # The tile on its own
+│   ├── devicestore_test.cpp    # Remembering devices, where logs go
+│   ├── sidebarwidget_test.cpp  # The tab over a fake adb
 │   └── adbprocess_test.cpp
 └── docs/
     └── DEVELOPER_GUIDE.md      # How to use this as a plugin template
@@ -317,7 +378,7 @@ building your own plugins.
 2. Rename the library in `CMakeLists.txt`
 3. Update `plugin.json` with your plugin's identity
 4. Modify `plugin.cpp` entry points
-5. Replace `AdbProcess` + `DeviceWidget` with your own logic
+5. Replace `AdbProcess` + `Sessions` with your own logic
 6. Build and install
 
 ## License

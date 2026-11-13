@@ -22,7 +22,8 @@
  * @brief Non-modal QDialog for ADB device selection and logcat session control.
  *
  * The DeviceWidget is opened from the Plugins → Android Logcat menu entry.
- * It provides:
+ * It is a view of the plugin's Sessions (sessions.h), which owns the device
+ * scan and the logcat sessions.  It provides:
  *
  *   - A combo box listing discovered ADB devices
  *   - A "Refresh" button to re-scan for devices (in the background)
@@ -33,53 +34,41 @@
  *   - An ADB path display with a "Configure" button
  *   - A status label showing active session count
  *
- * Multiple devices can be captured simultaneously — each gets its own
- * AdbProcess, temp file, and LogSquirl tab.
- *
  * OWNERSHIP
  * ─────────
  * The dialog is created by logsquirl_plugin_init() and deleted by
- * logsquirl_plugin_shutdown().  Active AdbProcess instances are children
- * of the DeviceWidget and are cleaned up automatically.
+ * logsquirl_plugin_shutdown(), before the Sessions it shows.
  */
 
 #pragma once
-
-#include "adbprocess.h"
 
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
 #include <QLabel>
 #include <QLineEdit>
-#include <QMap>
-#include <QProcess>
 #include <QPushButton>
-#include <QTimer>
 
 namespace logcat {
+
+class Sessions;
 
 /**
  * Non-modal dialog for managing ADB logcat sessions.
  *
- * When the user clicks "Start", an AdbProcess is created for the selected
- * device and the resulting temp file is opened in LogSquirl via the host API.
+ * When the user clicks "Start", the Sessions start a session for the
+ * selected device, whose file opens in a LogSquirl tab.
  */
 class DeviceWidget : public QDialog {
     Q_OBJECT
 
 public:
-    explicit DeviceWidget( QWidget* parent = nullptr );
-    ~DeviceWidget() override;
-
     /**
-     * Stop all active logcat sessions.
-     *
-     * Their temporary log files are kept for the tabs that show them, also
-     * when the plugin is disabled or updated at runtime.  The plugin removes
-     * them when LogSquirl quits (see tempdirs.h).
+     * @param sessions  The devices and sessions the dialog shows.  Must
+     *                  outlive the dialog.
+     * @param parent    QWidget parent.
      */
-    void stopAll();
+    explicit DeviceWidget( Sessions* sessions, QWidget* parent = nullptr );
 
     /**
      * Ask for the ADB executable path (Configure button, and Plugins →
@@ -89,80 +78,7 @@ public:
      */
     void configureAdbPath( QWidget* parent );
 
-    /** Number of currently running logcat sessions. */
-    int activeSessionCount() const;
-
-    /** Return the serials of all currently active sessions. */
-    QStringList activeSerials() const;
-
-    /**
-     * Rotate the log for an active session: the old temp file is preserved
-     * (tab stays open), a new temp file is created, and a new tab opens.
-     *
-     * @param serial  Device serial of the session to rotate.
-     */
-    void rotateSession( const QString& serial );
-
-    /**
-     * Start logcat capture for a specific device serial.
-     *
-     * @param serial    Device serial to capture.
-     * @param savePath  Optional path to a .log file for persistent saving.
-     *                  Refused if another active session writes to it.
-     * @return true if the session started successfully, false otherwise.
-     */
-    bool startSession( const QString& serial, const QString& savePath = {} );
-
-    /**
-     * Stop logcat capture for a specific device serial.
-     *
-     * @param serial  Device serial of the session to stop.
-     */
-    void stopSession( const QString& serial );
-
-    /**
-     * Return the current line count for an active session.
-     *
-     * @param serial  Device serial to query.
-     * @return Line count, or 0 if the session is not active.
-     */
-    qint64 sessionLineCount( const QString& serial ) const;
-
-    /**
-     * Check whether a session is currently running for the given serial.
-     */
-    bool isSessionActive( const QString& serial ) const;
-
-    /** Serials of the devices found by the most recent scan. */
-    const QStringList& devices() const
-    {
-        return devices_;
-    }
-
-public Q_SLOTS:
-    /**
-     * Re-scan for ADB devices.  `adb devices` runs in the background
-     * (starting the ADB server can take seconds); devicesChanged() is
-     * emitted when it has finished.  Requests made while a scan is
-     * running are folded into one more scan after it: the running scan
-     * may have started before whatever prompted the request.
-     */
-    void refreshDevices();
-
-    /**
-     * Abandon a running device scan and start a new one, e.g. because the
-     * ADB path has changed and the running scan's result would be stale.
-     */
-    void restartDeviceScan();
-
-Q_SIGNALS:
-    /** Emitted when a device scan has finished and devices() is updated. */
-    void devicesChanged();
-
 private Q_SLOTS:
-    /** Take the result of a finished `adb devices` scan. */
-    void onScanFinished( int exitCode, QProcess::ExitStatus exitStatus );
-
     /** Start logcat for the currently selected device. */
     void startCapture();
 
@@ -175,24 +91,12 @@ private Q_SLOTS:
     /** Let the user browse for a save file path. */
     void browseSavePath();
 
-    /** Handle a logcat session ending (cleanup bookkeeping). */
-    void onSessionFinished( const QString& serial );
-
-    /** Handle a logcat session error. */
-    void onSessionError( const QString& serial, const QString& message );
-
 private:
     /** Update UI state (button enable/disable, status label, ADB path). */
     void updateUiState();
 
-    /** Refill the device combo box from devices(), marking active sessions. */
+    /** Refill the device combo box from the devices, marking active sessions. */
     void updateDeviceCombo();
-
-    /** Store the result of a scan and announce it. */
-    void setDevices( const QStringList& devices );
-
-    /** Run the rescan requested during the scan that has just ended. */
-    void onScanEnded();
 
     /** Show on the Refresh button whether a scan is running. */
     void updateRefreshButton();
@@ -200,16 +104,7 @@ private:
     /** Return the serial of the currently selected device, or empty string. */
     QString currentSerial() const;
 
-    /**
-     * Remove the session for @p serial from the active sessions and cut its
-     * signals to this widget.  The caller stops and deletes it.
-     *
-     * @return The session, or nullptr if there is none for @p serial.
-     */
-    AdbProcess* takeSession( const QString& serial );
-
-    /** Whether an active session writes to the file at @p path. */
-    bool isFileInUse( const QString& path ) const;
+    Sessions* sessions_ = nullptr;
 
     // ── UI elements ──────────────────────────────────────────────────
     QComboBox* deviceCombo_ = nullptr;
@@ -223,15 +118,6 @@ private:
     QLabel* adbPathLabel_ = nullptr;
     QPushButton* adbConfigButton_ = nullptr;
     QLabel* statusLabel_ = nullptr;
-
-    // ── Device discovery ─────────────────────────────────────────────
-    QProcess* scanProcess_ = nullptr; ///< Runs `adb devices`.
-    QTimer* scanTimeout_ = nullptr;   ///< Gives up on a hanging scan.
-    QStringList devices_;             ///< Result of the last scan.
-    bool rescanPending_ = false;      ///< Scan again when the running scan ends.
-
-    // ── Active sessions (serial → AdbProcess*) ──────────────────────
-    QMap<QString, AdbProcess*> sessions_;
 };
 
 } // namespace logcat

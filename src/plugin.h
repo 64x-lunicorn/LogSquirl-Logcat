@@ -43,7 +43,9 @@
 #include <cstddef>
 
 namespace logcat {
+class DeviceStore;
 class DeviceWidget;
+class Sessions;
 class SidebarWidget;
 } // namespace logcat
 
@@ -59,8 +61,10 @@ namespace logcat {
 struct PluginState {
     const LogSquirlHostApi* api = nullptr;  ///< Host API function table.
     void* handle = nullptr;                 ///< Opaque plugin instance handle.
-    DeviceWidget* dialog = nullptr;         ///< Logcat session dialog.
-    SidebarWidget* sidebarWidget = nullptr; ///< Sidebar panel for session control.
+    Sessions* sessions = nullptr;           ///< The devices and their logcat sessions.
+    DeviceStore* store = nullptr;           ///< The devices seen before, and the log directory.
+    DeviceWidget* dialog = nullptr;         ///< Logcat session dialog, a view of sessions.
+    SidebarWidget* sidebarWidget = nullptr; ///< Sidebar tab, a view of sessions and store.
     bool sidebarTabRegistered = false;      ///< The host holds sidebarWidget as a tab.
     /// The size of the host's table (init_ex()): a function added after
     /// LogSquirl 26.10 may be used only if LOGSQUIRL_HOST_API_HAS( hostApiSize,

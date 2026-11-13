@@ -27,16 +27,18 @@
 
 #include <catch2/catch.hpp>
 
+#include <algorithm>
 #include <cstring>
 #include <memory>
 
+#include "devicetile.h"
 #include "devicewidget.h"
 #include "fakeadb.h"
 #include "plugin.h"
+#include "sessions.h"
 #include "sidebarwidget.h"
 
 #include <QApplication>
-#include <QComboBox>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -94,6 +96,7 @@ SCENARIO( "the Android Logcat dialog belongs to LogSquirl's window", "[plugin]" 
 
         logsquirl_plugin_shutdown();
         REQUIRE( logcat::g_state.dialog == nullptr );
+        REQUIRE( logcat::g_state.sessions == nullptr );
     }
 }
 
@@ -129,12 +132,15 @@ SCENARIO( "a new ADB path from Plugins → Configure is used right away", "[plug
             {
                 REQUIRE( waitFor(
                     []() {
-                        return logcat::g_state.dialog->devices() == QStringList{ "emulator-5556" };
+                        return logcat::g_state.sessions->devices()
+                               == QStringList{ "emulator-5556" };
                     },
                     3000 ) );
-                auto* sidebarCombo = logcat::g_state.sidebarWidget->findChild<QComboBox*>();
-                REQUIRE( sidebarCombo );
-                REQUIRE( sidebarCombo->findData( "emulator-5556" ) >= 0 );
+                const auto tiles
+                    = logcat::g_state.sidebarWidget->findChildren<logcat::DeviceTile*>();
+                REQUIRE( std::any_of( tiles.cbegin(), tiles.cend(), []( const auto* tile ) {
+                    return tile->serial() == "emulator-5556";
+                } ) );
             }
         }
 
@@ -158,7 +164,7 @@ QString dirOf( const QString& file )
  */
 void startStopAndStartAgain()
 {
-    auto* widget = logcat::g_state.dialog;
+    auto* widget = logcat::g_state.sessions;
     REQUIRE( widget->startSession( "emulator-5554" ) );
     widget->stopSession( "emulator-5554" );
     REQUIRE( widget->startSession( "emulator-5556" ) );
@@ -205,7 +211,7 @@ SCENARIO( "temporary files are removed only when LogSquirl quits", "[plugin]" )
             {
                 host.openedFiles.clear();
                 REQUIRE( logsquirl_plugin_init( api, handle ) == 0 );
-                REQUIRE( logcat::g_state.dialog->startSession( "emulator-5554" ) );
+                REQUIRE( logcat::g_state.sessions->startSession( "emulator-5554" ) );
                 const auto newDir = dirOf( host.openedFiles.first() );
                 logsquirl_plugin_shutdown();
 
@@ -252,7 +258,7 @@ SCENARIO( "save paths are never removed", "[plugin]" )
         FakeHost host;
         logcat_test::installFakeAdb( host );
         REQUIRE( logsquirl_plugin_init( logcat::g_state.api, logcat::g_state.handle ) == 0 );
-        auto* widget = logcat::g_state.dialog;
+        auto* widget = logcat::g_state.sessions;
         const auto logDir = host.tempRoot() + "/logs";
         const auto stoppedPath = logDir + "/stopped.log";
         const auto rotatedPath = logDir + "/rotated.log";
@@ -355,6 +361,42 @@ SCENARIO( "temporary directories of LogSquirl processes that ended are swept", "
 #endif
 }
 
+#ifdef Q_OS_UNIX
+SCENARIO( "the sidebar remembers the devices it saw when LogSquirl restarts", "[plugin]" )
+{
+    GIVEN( "an initialised plugin whose adb lists a device" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb(
+            host, "exec sleep 30\n",
+            "printf 'List of devices attached\\n3A1B2C3D4E5F  device model:Pixel_8\\n\\n'\n" );
+        REQUIRE( logsquirl_plugin_init( host.api(), &host ) == 0 );
+        REQUIRE( waitFor( []() { return !logcat::g_state.sessions->devices().isEmpty(); } ) );
+
+        WHEN( "LogSquirl quits, the device is unplugged, and LogSquirl starts again" )
+        {
+            QMetaObject::invokeMethod( QCoreApplication::instance(), "aboutToQuit" );
+            logsquirl_plugin_shutdown();
+            logcat_test::installFakeAdb( host, "exec sleep 30\n",
+                                         "printf 'List of devices attached\\n\\n'\n" );
+            REQUIRE( logsquirl_plugin_init( host.api(), &host ) == 0 );
+            REQUIRE( waitFor( []() { return !logcat::g_state.sessions->isScanning(); } ) );
+
+            THEN( "the sidebar has its tile, disconnected" )
+            {
+                const auto tiles
+                    = logcat::g_state.sidebarWidget->findChildren<logcat::DeviceTile*>();
+                REQUIRE( tiles.size() == 1 );
+                REQUIRE( tiles.first()->serial() == "3A1B2C3D4E5F" );
+                REQUIRE( tiles.first()->state() == logcat::TileState::Disconnected );
+            }
+        }
+
+        logsquirl_plugin_shutdown();
+    }
+}
+#endif
+
 SCENARIO( "the plugin registers its sidebar tab for its lifetime", "[plugin]" )
 {
     GIVEN( "a host" )
@@ -380,6 +422,7 @@ SCENARIO( "the plugin registers its sidebar tab for its lifetime", "[plugin]" )
                     REQUIRE( host.sidebarTabs.isEmpty() );
                     REQUIRE( logcat::g_state.sidebarWidget == nullptr );
                     REQUIRE( logcat::g_state.dialog == nullptr );
+                    REQUIRE( logcat::g_state.sessions == nullptr );
                     REQUIRE_FALSE( logcat::g_state.initialised );
                 }
             }
@@ -409,6 +452,7 @@ SCENARIO( "no exception leaves an entry point", "[plugin]" )
                 REQUIRE( rc != 0 );
                 REQUIRE( logcat::g_state.sidebarWidget == nullptr );
                 REQUIRE( logcat::g_state.dialog == nullptr );
+                REQUIRE( logcat::g_state.sessions == nullptr );
                 REQUIRE_FALSE( host.logs.filter( "no room for another tab" ).isEmpty() );
             }
         }
@@ -433,6 +477,7 @@ SCENARIO( "no exception leaves an entry point", "[plugin]" )
                 REQUIRE( host.sidebarTabs.isEmpty() );
                 REQUIRE( logcat::g_state.sidebarWidget == nullptr );
                 REQUIRE( logcat::g_state.dialog == nullptr );
+                REQUIRE( logcat::g_state.sessions == nullptr );
             }
         }
 
@@ -454,6 +499,7 @@ SCENARIO( "no exception leaves an entry point", "[plugin]" )
                 REQUIRE( host.sidebarTabs.isEmpty() );
                 REQUIRE( logcat::g_state.sidebarWidget == nullptr );
                 REQUIRE( logcat::g_state.dialog == nullptr );
+                REQUIRE( logcat::g_state.sessions == nullptr );
                 REQUIRE_FALSE( logcat::g_state.initialised );
             }
         }
