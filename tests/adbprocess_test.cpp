@@ -497,6 +497,39 @@ SCENARIO( "rotateLog moves the capture to a new file", "[adbprocess]" )
 #endif
 
 #ifdef Q_OS_UNIX
+SCENARIO( "the stop log line counts the lines of every file after a Rotate", "[adbprocess]" )
+{
+    GIVEN( "a session that wrote a line, rotated, then wrote another" )
+    {
+        FakeHost host;
+        const auto trigger = host.configDir() + "/go";
+        logcat_test::installFakeAdb( host, logcat_test::scriptWaitingFor( trigger ) );
+
+        AdbProcess proc( "emulator-5554" );
+        REQUIRE( proc.start() );
+        REQUIRE( waitFor( [ &proc ]() { return proc.lineCount() == 1; } ) );
+        REQUIRE_FALSE( proc.rotateLog().isEmpty() );
+        touch( trigger );
+        REQUIRE( waitFor( [ &proc ]() { return proc.counters().lines == 2; } ) );
+
+        WHEN( "it is stopped" )
+        {
+            proc.stop();
+
+            THEN( "the host log counts both lines, not only the last file's" )
+            {
+                REQUIRE( host.logs
+                             .filter( "Stopped logcat for device emulator-5554 (2 lines "
+                                      "captured)" )
+                             .size()
+                         == 1 );
+            }
+        }
+    }
+}
+#endif
+
+#ifdef Q_OS_UNIX
 SCENARIO( "destroying a running session does not call back its owner", "[adbprocess]" )
 {
     GIVEN( "a running session with listeners" )

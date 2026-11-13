@@ -469,7 +469,7 @@ void AdbProcess::stopAll( const QList<AdbProcess*>& sessions )
         session->tempFile_.close();
         hostLog( LOGSQUIRL_LOG_INFO, QString( "Stopped logcat for device %1 (%2 lines captured)" )
                                          .arg( session->serial_ )
-                                         .arg( session->lineCount_ ) );
+                                         .arg( session->counters_.lines ) );
     }
 }
 
