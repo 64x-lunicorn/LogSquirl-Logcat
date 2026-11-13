@@ -289,7 +289,7 @@ void Sessions::stopSession( const QString& serial )
     proc->preserveTempFile();
 
     hostNotify(
-        QString( "Logcat stopped for %1 (%2 lines)" ).arg( serial ).arg( proc->lineCount() ) );
+        QString( "Logcat stopped for %1 (%2 lines)" ).arg( serial ).arg( proc->counters().lines ) );
 
     proc->deleteLater();
     Q_EMIT sessionStopped( serial );

@@ -82,6 +82,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   session continues in a new file next to it, instead of failing, and a
   second device given the same `~/…` path is refused instead of writing
   into the same file (#43).
+- **The stop notification counts the whole session's lines.** After a
+  Rotate, "Logcat stopped for … (N lines)" counts every line since Start,
+  instead of only those of the last file (#52).
 
 ## [0.4.0] — 2026-09-30
 
