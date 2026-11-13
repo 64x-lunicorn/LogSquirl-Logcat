@@ -88,7 +88,8 @@ set(PLUGIN_INSTALL_DIR
 )
 
 install(TARGETS logsquirl_logcat LIBRARY DESTINATION "${PLUGIN_INSTALL_DIR}")
-install(FILES   plugin.json              DESTINATION "${PLUGIN_INSTALL_DIR}")
+# The icon plugin.json names, as the release packages carry it.
+install(FILES   plugin.json icon.png     DESTINATION "${PLUGIN_INSTALL_DIR}")
 # The filter group and highlighter set, next to the library as plugin.json
 # names them: LogSquirl 26.12 reads them from there, older hosts import them
 # (README).
