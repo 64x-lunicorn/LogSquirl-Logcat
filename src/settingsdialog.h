@@ -44,23 +44,23 @@ class QLineEdit;
 
 namespace logcat {
 
+class DeviceScan;
 class DeviceStore;
-class Sessions;
 
 class SettingsDialog : public QDialog {
     Q_OBJECT
 
 public:
-    /// Shows the settings of @p store and of adb; @p sessions rescans
-    /// with a new ADB path.  Both must outlive it.
-    SettingsDialog( DeviceStore* store, Sessions* sessions, QWidget* parent = nullptr );
+    /// Shows the settings of @p store and of adb; @p scan rescans with a
+    /// new ADB path.  Both must outlive it.
+    SettingsDialog( DeviceStore* store, DeviceScan* scan, QWidget* parent = nullptr );
 
     /// Save the settings, rescan with a new ADB path, and close.
     void accept() override;
 
 private:
     DeviceStore* store_;
-    Sessions* sessions_;
+    DeviceScan* scan_;
     QLineEdit* logDir_;
     QLineEdit* adbPath_;
 };

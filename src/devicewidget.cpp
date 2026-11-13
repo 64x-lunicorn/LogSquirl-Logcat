@@ -21,13 +21,15 @@
  * @file devicewidget.cpp
  * @brief Implementation of the DeviceWidget dialog.
  *
- * The dialog only shows the plugin's Sessions (sessions.h) and calls it:
- * its buttons start, stop and rescan through Sessions, and Sessions'
- * signals refill the device combo box and the buttons.
+ * The dialog only shows the plugin's DeviceScan (devicescan.h) and Sessions
+ * (sessions.h) and calls them: its buttons rescan through the scan and
+ * start and stop through Sessions, and their signals refill the device
+ * combo box and the buttons.
  */
 
 #include "devicewidget.h"
 #include "adbprocess.h"
+#include "devicescan.h"
 #include "plugin.h"
 #include "sessions.h"
 
@@ -41,8 +43,9 @@ namespace logcat {
 
 // ── Construction ────────────────────────────────────────────────────────
 
-DeviceWidget::DeviceWidget( Sessions* sessions, QWidget* parent )
+DeviceWidget::DeviceWidget( DeviceScan* scan, Sessions* sessions, QWidget* parent )
     : QDialog( parent )
+    , scan_( scan )
     , sessions_( sessions )
 {
     setWindowTitle( "Android Logcat" );
@@ -135,9 +138,8 @@ DeviceWidget::DeviceWidget( Sessions* sessions, QWidget* parent )
     // ── Connect signals ──────────────────────────────────────────────
     // Each handler runs through guarded(): an exception must not unwind
     // through Qt's event loop into the host.
-    connect( refreshButton_, &QPushButton::clicked, this, [ this ]() {
-        guarded( "refreshing the devices", [ this ] { sessions_->refreshDevices(); } );
-    } );
+    connect( refreshButton_, &QPushButton::clicked, this,
+             [ this ]() { guarded( "refreshing the devices", [ this ] { scan_->refresh(); } ); } );
     connect( startButton_, &QPushButton::clicked, this,
              [ this ]() { guarded( "starting a capture", [ this ] { startCapture(); } ); } );
     connect( stopButton_, &QPushButton::clicked, this,
@@ -158,10 +160,10 @@ DeviceWidget::DeviceWidget( Sessions* sessions, QWidget* parent )
     connect( deviceCombo_, &QComboBox::currentIndexChanged, this,
              [ this ]() { guarded( "selecting a device", [ this ] { updateUiState(); } ); } );
 
-    // ── Follow the sessions ──────────────────────────────────────────
-    connect( sessions_, &Sessions::devicesChanged, this,
+    // ── Follow the devices and the sessions ──────────────────────────
+    connect( scan_, &DeviceScan::devicesChanged, this,
              [ this ]() { guarded( "showing the devices", [ this ] { updateDeviceCombo(); } ); } );
-    connect( sessions_, &Sessions::scanningChanged, this, [ this ]() {
+    connect( scan_, &DeviceScan::scanningChanged, this, [ this ]() {
         guarded( "showing the device scan", [ this ] { updateRefreshButton(); } );
     } );
     connect( sessions_, &Sessions::sessionStarted, this, [ this ]() {
@@ -171,7 +173,7 @@ DeviceWidget::DeviceWidget( Sessions* sessions, QWidget* parent )
         guarded( "showing a stopped capture", [ this ] { updateDeviceCombo(); } );
     } );
 
-    // Sessions has started the first device scan; devicesChanged() fills
+    // The scan has started the first device scan; devicesChanged() fills
     // in the result.
     updateDeviceCombo();
     updateRefreshButton();
@@ -181,7 +183,7 @@ DeviceWidget::DeviceWidget( Sessions* sessions, QWidget* parent )
 
 void DeviceWidget::updateRefreshButton()
 {
-    const bool scanning = sessions_->isScanning();
+    const bool scanning = scan_->isScanning();
     refreshButton_->setEnabled( !scanning );
     refreshButton_->setText( scanning ? "Scanning…" : "⟳ Refresh" );
 }
@@ -191,7 +193,7 @@ void DeviceWidget::updateDeviceCombo()
     const auto currentSelection = currentSerial();
     deviceCombo_->clear();
 
-    const auto& devices = sessions_->devices();
+    const auto& devices = scan_->devices();
     if ( devices.isEmpty() ) {
         deviceCombo_->addItem( "(no devices)" );
         deviceCombo_->setEnabled( false );
@@ -313,7 +315,7 @@ void DeviceWidget::configureAdbPath( QWidget* parent )
         hostLog( LOGSQUIRL_LOG_INFO, newPath.isEmpty()
                                          ? "ADB path override cleared — using auto-detection."
                                          : "ADB path set to: " + newPath );
-        sessions_->restartDeviceScan();
+        scan_->restart();
     }
 }
 

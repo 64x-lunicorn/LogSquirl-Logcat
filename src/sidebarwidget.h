@@ -63,7 +63,8 @@
  * ─────────
  * Created by logsquirl_plugin_init() and registered with
  * register_sidebar_tab; the host parents it.  logsquirl_plugin_shutdown()
- * unregisters and deletes it, before the sessions and the store it shows.
+ * unregisters and deletes it, before the scan, the sessions and the store
+ * it shows.
  */
 
 #pragma once
@@ -86,6 +87,7 @@ class QVBoxLayout;
 
 namespace logcat {
 
+class DeviceScan;
 class DeviceStore;
 class DeviceTile;
 class Sessions;
@@ -100,9 +102,10 @@ public:
     /// How often a running tile's counters are polled, in milliseconds.
     static constexpr int kCounterPollMs = 1000;
 
-    /// Shows the devices of @p store and @p sessions, and the sessions of
-    /// @p sessions, which must both outlive it.
-    SidebarWidget( DeviceStore* store, Sessions* sessions, QWidget* parent = nullptr );
+    /// Shows the devices of @p store and @p scan, and the sessions of
+    /// @p sessions, which must all outlive it.
+    SidebarWidget( DeviceStore* store, DeviceScan* scan, Sessions* sessions,
+                   QWidget* parent = nullptr );
 
     /// Show the devices and sessions as they are now.
     void reload();
@@ -144,6 +147,7 @@ private:
     DeviceTile* tileFor( const QString& serial );
 
     DeviceStore* store_;
+    DeviceScan* scan_;
     Sessions* sessions_;
     QPushButton* stopAll_;
     QLabel* empty_;

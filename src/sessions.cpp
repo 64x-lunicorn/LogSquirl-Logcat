@@ -19,7 +19,7 @@
 
 /**
  * @file sessions.cpp
- * @brief Implementation of Sessions: the devices, and the logcat session of each.
+ * @brief Implementation of Sessions: the logcat session of each device.
  *
  * Sessions keeps a map of serial → AdbProcess*.  startSession():
  *
@@ -41,10 +41,6 @@
 
 #include <QDir>
 #include <QFileInfo>
-#include <QSignalBlocker>
-#include <QTimer>
-
-#include <algorithm>
 
 namespace logcat {
 
@@ -89,163 +85,6 @@ void openFollowed( const QString& path )
 Sessions::Sessions( QObject* parent )
     : QObject( parent )
 {
-    scanProcess_ = new QProcess( this );
-    // Each handler runs through guarded(): an exception must not unwind
-    // through Qt's event loop into the host.
-    connect( scanProcess_, &QProcess::finished, this,
-             [ this ]( int exitCode, QProcess::ExitStatus exitStatus ) {
-                 guarded( "reading the device list", [ this, exitCode, exitStatus ] {
-                     onScanFinished( exitCode, exitStatus );
-                 } );
-             } );
-    connect( scanProcess_, &QProcess::errorOccurred, this,
-             [ this ]( QProcess::ProcessError error ) {
-                 guarded( "reporting a device scan error", [ this, error ] {
-                     // No finished() follows a failed start
-                     if ( error == QProcess::FailedToStart ) {
-                         scanTimeout_->stop();
-                         onScanFailed( "adb devices could not be started: "
-                                       + scanProcess_->errorString() );
-                         setDevices( {} );
-                         onScanEnded();
-                     }
-                 } );
-             } );
-
-    // The first scan may need to start the ADB server, which can take
-    // several seconds; give up after 10.
-    scanTimeout_ = new QTimer( this );
-    scanTimeout_->setSingleShot( true );
-    scanTimeout_->setInterval( 10000 );
-    connect( scanTimeout_, &QTimer::timeout, this, [ this ]() {
-        guarded( "ending a device scan that timed out", [ this ] {
-            onScanFailed( "adb devices timed out." );
-            scanProcess_->kill();
-        } );
-    } );
-
-    refreshDevices();
-}
-
-Sessions::~Sessions()
-{
-    // The scan must not report into a half-destroyed object, and a scan
-    // that is still running is killed and reaped here rather than left
-    // to ~QProcess, which only warns and waits for it.
-    scanProcess_->disconnect( this );
-    if ( scanProcess_->state() != QProcess::NotRunning ) {
-        scanProcess_->kill();
-        scanProcess_->waitForFinished( 1000 );
-    }
-}
-
-// ── Devices ─────────────────────────────────────────────────────────────
-
-bool Sessions::isScanning() const
-{
-    return scanProcess_->state() != QProcess::NotRunning;
-}
-
-void Sessions::refreshDevices()
-{
-    if ( isScanning() ) {
-        rescanPending_ = true;
-        return;
-    }
-
-    const auto adb = AdbProcess::findAdb();
-    if ( adb.isEmpty() ) {
-        onScanFailed( "adb not found — cannot discover devices." );
-        setDevices( {} );
-        // A scan that ended just before may have left a view showing "Scanning…"
-        Q_EMIT scanningChanged();
-        return;
-    }
-
-    scanProcess_->setProgram( adb );
-    // -l: also the model of each device
-    scanProcess_->setArguments( { "devices", "-l" } );
-    // Arm the timeout first: on Windows a failed start is reported from
-    // inside start(), and that handler stops the timeout.
-    scanTimeout_->start();
-    scanProcess_->start();
-    Q_EMIT scanningChanged();
-}
-
-void Sessions::restartDeviceScan()
-{
-    if ( isScanning() ) {
-        // Its result is not wanted, not even as an empty list.
-        const QSignalBlocker blocker( scanProcess_ );
-        scanTimeout_->stop();
-        scanProcess_->kill();
-        scanProcess_->waitForFinished( 1000 );
-    }
-    rescanPending_ = false;
-    refreshDevices();
-}
-
-void Sessions::onScanFinished( int exitCode, QProcess::ExitStatus exitStatus )
-{
-    scanTimeout_->stop();
-
-    QList<Device> found;
-    if ( exitStatus == QProcess::CrashExit ) {
-        // Killed after the timeout, which has been logged already
-    }
-    else if ( exitCode != 0 ) {
-        onScanFailed( "adb devices failed: "
-                      + QString::fromUtf8( scanProcess_->readAllStandardError() ).trimmed() );
-    }
-    else {
-        found = AdbProcess::parseDevices( scanProcess_->readAllStandardOutput() );
-        // The sidebar rescans every few seconds: only news is logged, and
-        // the devices after a failure.
-        if ( !scanned_ || found != attached_ || !scanError_.isEmpty() ) {
-            const auto ready = std::count_if( found.cbegin(), found.cend(),
-                                              []( const Device& d ) { return d.isReady(); } );
-            hostLog(
-                LOGSQUIRL_LOG_INFO,
-                QString( "Discovered %1 device(s), %2 ready." ).arg( found.size() ).arg( ready ) );
-        }
-        scanned_ = true;
-        scanError_.clear();
-    }
-
-    setDevices( found );
-    onScanEnded();
-}
-
-void Sessions::onScanFailed( const QString& message )
-{
-    // The sidebar rescans every few seconds: the same failure is logged once.
-    if ( message != scanError_ ) {
-        hostLog( LOGSQUIRL_LOG_WARNING, message );
-        scanError_ = message;
-    }
-}
-
-void Sessions::onScanEnded()
-{
-    if ( rescanPending_ ) {
-        rescanPending_ = false;
-        refreshDevices();
-    }
-    else {
-        Q_EMIT scanningChanged();
-    }
-}
-
-void Sessions::setDevices( const QList<Device>& devices )
-{
-    attached_ = devices;
-    devices_.clear();
-    for ( const auto& device : devices ) {
-        if ( device.isReady() ) {
-            devices_.append( device.serial );
-        }
-    }
-    Q_EMIT devicesChanged();
 }
 
 // ── Sessions ────────────────────────────────────────────────────────────
@@ -403,8 +242,8 @@ void Sessions::onSessionFinished( const QString& serial )
     hostLog( LOGSQUIRL_LOG_INFO, QString( "Logcat session for %1 ended." ).arg( serial ) );
     Q_EMIT sessionStopped( serial );
 
-    // adb exits when its device goes away; find out whether it did
-    refreshDevices();
+    // adb exits when its device goes away: the scan finds out whether it did
+    Q_EMIT sessionEnded( serial );
 }
 
 void Sessions::onSessionError( const QString& serial, const QString& message )

@@ -25,9 +25,9 @@
 #include "settingsdialog.h"
 
 #include "adbprocess.h"
+#include "devicescan.h"
 #include "devicestore.h"
 #include "plugin.h"
-#include "sessions.h"
 
 #include <QDialogButtonBox>
 #include <QFileDialog>
@@ -54,10 +54,10 @@ QHBoxLayout* withBrowse( QLineEdit* edit, QPushButton* browse, const char* brows
 
 } // namespace
 
-SettingsDialog::SettingsDialog( DeviceStore* store, Sessions* sessions, QWidget* parent )
+SettingsDialog::SettingsDialog( DeviceStore* store, DeviceScan* scan, QWidget* parent )
     : QDialog( parent )
     , store_( store )
-    , sessions_( sessions )
+    , scan_( scan )
     , logDir_( new QLineEdit( this ) )
     , adbPath_( new QLineEdit( this ) )
 {
@@ -132,7 +132,7 @@ void SettingsDialog::accept()
             hostLog( LOGSQUIRL_LOG_INFO, adbPath.isEmpty()
                                              ? "ADB path override cleared — using auto-detection."
                                              : "ADB path set to: " + adbPath );
-            sessions_->restartDeviceScan();
+            scan_->restart();
         }
         else {
             hostLog( LOGSQUIRL_LOG_WARNING,

@@ -40,6 +40,7 @@ add_library(logsquirl_logcat SHARED
     src/adbprocess.cpp
     src/tempdirs.cpp
     src/sessions.cpp
+    src/devicescan.cpp
     src/devicewidget.cpp
     src/sidebarwidget.cpp
     src/deviceroster.cpp

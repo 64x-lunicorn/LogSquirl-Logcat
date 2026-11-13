@@ -322,6 +322,7 @@ classDiagram
     class PluginState {
         +LogSquirlHostApi* api
         +void* handle
+        +DeviceScan* scan
         +Sessions* sessions
         +DeviceStore* store
         +DeviceWidget* dialog
@@ -329,12 +330,31 @@ classDiagram
         +bool initialised
     }
 
-    class Sessions {
-        -map~QString, AdbProcess*~ sessions_
-        -QProcess* scanProcess_
+    class DeviceScan {
+        -AdbDevicesRunner* runner_
         +devices() QStringList
         +attachedDevices() QList~Device~
-        +refreshDevices()
+        +isScanning() bool
+        +refresh()
+        +restart()
+        devicesChanged()
+        scanningChanged()
+    }
+
+    class AdbDevicesRunner {
+        <<port>>
+        +start(adb)
+        +abandon()
+        listed(output)
+        failed(message)
+    }
+
+    class QProcessAdbDevices {
+        -QProcess* process_
+    }
+
+    class Sessions {
+        -map~QString, AdbProcess*~ sessions_
         +startSession(serial, savePath) bool
         +stopSession(serial)
         +rotateSession(serial)
@@ -343,12 +363,14 @@ classDiagram
         sessionStarted(serial)
         sessionStopped(serial)
         sessionChanged(serial)
+        sessionEnded(serial)
     }
 
     class DeviceWidget {
         -QComboBox* deviceCombo_
         -QPushButton* startButton_
         -QPushButton* stopButton_
+        -DeviceScan* scan_
         -Sessions* sessions_
         -startCapture()
         -stopCapture()
@@ -358,6 +380,7 @@ classDiagram
         -QHash~QString, DeviceTile*~ tileBySerial_
         -QTimer* scanTimer_
         -QTimer* pollTimer_
+        -DeviceScan* scan_
         -Sessions* sessions_
         -DeviceStore* store_
         +reload()
@@ -407,11 +430,16 @@ classDiagram
         +findAdb()$ QString
     }
 
+    PluginState --> DeviceScan : scan
     PluginState --> Sessions : sessions
     PluginState --> DeviceStore : store
     PluginState --> DeviceWidget : dialog
     PluginState --> SidebarWidget : sidebarWidget
+    DeviceScan --> AdbDevicesRunner : runs adb devices -l
+    AdbDevicesRunner <|-- QProcessAdbDevices
+    DeviceWidget --> DeviceScan : view of
     DeviceWidget --> Sessions : view of
+    SidebarWidget --> DeviceScan : view of
     SidebarWidget --> Sessions : view of
     SidebarWidget --> DeviceStore : view of
     SidebarWidget --> DeviceTile : one per device
@@ -426,7 +454,7 @@ device — the card of LogSquirl-NATS's connection tiles, except that a tile
 stands for a device, not for a saved configuration:
 
 - **Which devices.** Every device `adb devices -l` lists, in any state
-  (`Sessions::attachedDevices()`, parsed by `AdbProcess::parseDevices()`),
+  (`DeviceScan::attachedDevices()`, parsed by `AdbProcess::parseDevices()`),
   and every device seen before (`DeviceStore`, the array `devices` in
   `logcat.ini`), first seen first. While it is shown, the tab rescans every
   `SidebarWidget::kScanIntervalMs` (3 s), so a device plugged in or unplugged

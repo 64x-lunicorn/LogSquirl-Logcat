@@ -236,19 +236,24 @@ graph TD
         SW[SidebarWidget<br/>one DeviceTile per device]
         ST[DeviceStore<br/>devices seen before + log directory]
         DW[DeviceWidget<br/>dialog]
-        S[Sessions<br/>device scan + sessions]
+        DS[DeviceScan<br/>adb devices -l, through a port]
+        S[Sessions<br/>a logcat session per device]
         AP1[AdbProcess #1<br/>emulator-5554]
         AP2[AdbProcess #2<br/>R5CR10XXXXX]
     end
 
     H -- register_sidebar_tab --> P
+    P -- creates --> DS
     P -- creates --> S
     P -- creates --> SW
     P -- creates --> DW
     P -- creates --> ST
+    SW -- view of --> DS
     SW -- view of --> S
     SW -- view of --> ST
+    DW -- view of --> DS
     DW -- view of --> S
+    S -- sessionEnded: rescan --> DS
     SW --> SB
     S -- manages --> AP1
     S -- manages --> AP2
@@ -320,9 +325,11 @@ logsquirl-logcat/
 │   ├── plugin.cpp              # C ABI entry points (get_info, init, shutdown)
 │   ├── adbprocess.h            # ADB discovery + per-device QProcess wrapper
 │   ├── adbprocess.cpp
-│   ├── sessions.h              # Device scan + sessions (start/stop/rotate, counters)
+│   ├── devicescan.h            # Device scan (adb devices -l) behind a port, QProcess adapter
+│   ├── devicescan.cpp
+│   ├── sessions.h              # Sessions (start/stop/rotate, counters)
 │   ├── sessions.cpp
-│   ├── devicewidget.h          # The Android Logcat dialog, a view of Sessions
+│   ├── devicewidget.h          # The Android Logcat dialog, a view of the scan and Sessions
 │   ├── devicewidget.cpp
 │   ├── sidebarwidget.h         # LogSquirl sidebar tab: one tile per device
 │   ├── sidebarwidget.cpp
@@ -344,6 +351,8 @@ logsquirl-logcat/
 │   ├── devicetile_test.cpp     # The tile on its own
 │   ├── devicestore_test.cpp    # Remembering devices, where logs go
 │   ├── deviceroster_test.cpp   # Table tests: what each tile shows
+│   ├── devicescan_test.cpp     # The device scan, its runs completed by the test
+│   ├── fakeadbdevices.h        # The scan's test adapter: a test ends each run
 │   ├── sidebarwidget_test.cpp  # The tab over a fake adb
 │   └── adbprocess_test.cpp
 └── docs/

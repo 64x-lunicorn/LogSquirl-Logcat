@@ -23,13 +23,14 @@
  * a running tile's details (issue #49).
  *
  * The sidebar is driven through its widgets (the tiles' named children, the
- * Settings dialog) over a real Sessions and DeviceStore, with a FakeHost
- * and a stand-in for adb whose device list a test changes: plugging and
- * unplugging a device is writing a line to that list (see attachedFile()).
+ * Settings dialog) over a real DeviceScan, Sessions and DeviceStore, with a
+ * FakeHost and a stand-in for adb whose device list a test changes: plugging
+ * and unplugging a device is writing a line to that list (see attachedFile()).
  */
 
 #include <catch2/catch.hpp>
 
+#include "devicescan.h"
 #include "devicestore.h"
 #include "devicetile.h"
 #include "fakeadb.h"
@@ -48,6 +49,7 @@
 
 #include <memory>
 
+using logcat::DeviceScan;
 using logcat::DeviceStore;
 using logcat::DeviceTile;
 using logcat::Sessions;
@@ -109,14 +111,13 @@ QString textOf( const QWidget* widget, const char* name )
 }
 
 /// Rescan, and wait until the scan has ended.
-void rescan( Sessions& sessions )
+void rescan( DeviceScan& scan )
 {
     int changes = 0;
     const auto connection
-        = QObject::connect( &sessions, &Sessions::devicesChanged, [ &changes ]() { ++changes; } );
-    sessions.refreshDevices();
-    REQUIRE(
-        waitFor( [ &changes, &sessions ]() { return changes > 0 && !sessions.isScanning(); } ) );
+        = QObject::connect( &scan, &DeviceScan::devicesChanged, [ &changes ]() { ++changes; } );
+    scan.refresh();
+    REQUIRE( waitFor( [ &changes, &scan ]() { return changes > 0 && !scan.isScanning(); } ) );
     QObject::disconnect( connection );
 }
 
@@ -131,11 +132,12 @@ SCENARIO( "the sidebar has a tile for each device, plugged in or seen before", "
         installAdbWithAttachedDevices( host );
         const auto settingsFile = host.configDir() + "/logcat.ini";
         auto store = std::make_unique<DeviceStore>( settingsFile );
+        auto scan = std::make_unique<DeviceScan>();
         auto sessions = std::make_unique<Sessions>();
-        auto sidebar = std::make_unique<SidebarWidget>( store.get(), sessions.get() );
+        auto sidebar = std::make_unique<SidebarWidget>( store.get(), scan.get(), sessions.get() );
         // The devices are rescanned only while the tab shows.
         sidebar->show();
-        REQUIRE( waitFor( [ &sessions ]() { return !sessions->isScanning(); } ) );
+        REQUIRE( waitFor( [ &scan ]() { return !scan->isScanning(); } ) );
 
         THEN( "it has no tile, and says how to get one" )
         {
@@ -166,10 +168,10 @@ SCENARIO( "the sidebar has a tile for each device, plugged in or seen before", "
 
             AND_WHEN( "it is unplugged" )
             {
-                rescan( *sessions );
+                rescan( *scan );
                 REQUIRE( tileOf( *sidebar, "3A1B2C3D4E5F" ) );
                 attach( host, {} );
-                rescan( *sessions );
+                rescan( *scan );
                 auto* tile = tileOf( *sidebar, "3A1B2C3D4E5F" );
 
                 THEN( "its tile stays, disconnected, with Forget" )
@@ -185,11 +187,14 @@ SCENARIO( "the sidebar has a tile for each device, plugged in or seen before", "
                 {
                     sidebar.reset();
                     sessions.reset();
+                    scan.reset();
                     store.reset();
                     store = std::make_unique<DeviceStore>( settingsFile );
+                    scan = std::make_unique<DeviceScan>();
                     sessions = std::make_unique<Sessions>();
-                    sidebar = std::make_unique<SidebarWidget>( store.get(), sessions.get() );
-                    REQUIRE( waitFor( [ &sessions ]() { return !sessions->isScanning(); } ) );
+                    sidebar = std::make_unique<SidebarWidget>( store.get(), scan.get(),
+                                                               sessions.get() );
+                    REQUIRE( waitFor( [ &scan ]() { return !scan->isScanning(); } ) );
 
                     THEN( "the device it remembers has its tile, disconnected" )
                     {
@@ -225,17 +230,18 @@ SCENARIO( "the sidebar rescans the devices only while it shows", "[sidebarwidget
         FakeHost host;
         installAdbWithAttachedDevices( host );
         DeviceStore store( host.configDir() + "/logcat.ini" );
+        DeviceScan scan;
         Sessions sessions;
-        SidebarWidget sidebar( &store, &sessions );
-        REQUIRE( waitFor( [ &sessions ]() { return !sessions.isScanning(); } ) );
-        auto* scan = sidebar.findChild<QTimer*>( "deviceScan" );
+        SidebarWidget sidebar( &store, &scan, &sessions );
+        REQUIRE( waitFor( [ &scan ]() { return !scan.isScanning(); } ) );
+        auto* scanTimer = sidebar.findChild<QTimer*>( "deviceScan" );
         auto* poll = sidebar.findChild<QTimer*>( "counterPoll" );
-        REQUIRE( scan );
+        REQUIRE( scanTimer );
         REQUIRE( poll );
 
         THEN( "neither the devices are rescanned nor the counters polled" )
         {
-            REQUIRE_FALSE( scan->isActive() );
+            REQUIRE_FALSE( scanTimer->isActive() );
             REQUIRE_FALSE( poll->isActive() );
         }
 
@@ -246,23 +252,23 @@ SCENARIO( "the sidebar rescans the devices only while it shows", "[sidebarwidget
 
             THEN( "the devices are scanned at once, and then every few seconds" )
             {
-                REQUIRE( sessions.isScanning() );
+                REQUIRE( scan.isScanning() );
                 REQUIRE( waitFor(
                     [ &sidebar ]() { return tileOf( sidebar, "emulator-5554" ) != nullptr; },
                     SidebarWidget::kScanIntervalMs / 2 ) );
-                REQUIRE( scan->isActive() );
-                REQUIRE( scan->interval() == SidebarWidget::kScanIntervalMs );
+                REQUIRE( scanTimer->isActive() );
+                REQUIRE( scanTimer->interval() == SidebarWidget::kScanIntervalMs );
                 REQUIRE( poll->isActive() );
             }
 
             AND_WHEN( "it is hidden again" )
             {
-                REQUIRE( waitFor( [ &sessions ]() { return !sessions.isScanning(); } ) );
+                REQUIRE( waitFor( [ &scan ]() { return !scan.isScanning(); } ) );
                 sidebar.hide();
 
                 THEN( "the rescans and the polls stop" )
                 {
-                    REQUIRE_FALSE( scan->isActive() );
+                    REQUIRE_FALSE( scanTimer->isActive() );
                     REQUIRE_FALSE( poll->isActive() );
                 }
             }
@@ -281,9 +287,10 @@ SCENARIO( "Start and Stop on a tile run logcat for its device", "[sidebarwidget]
         attach( host, "emulator-5554  device model:sdk_gphone64\n"
                       "emulator-5556  device model:sdk_gphone64\n" );
         DeviceStore store( host.configDir() + "/logcat.ini" );
+        DeviceScan scan;
         Sessions sessions;
-        const SidebarWidget sidebar( &store, &sessions );
-        REQUIRE( waitFor( [ &sessions ]() { return sessions.devices().size() == 2; } ) );
+        const SidebarWidget sidebar( &store, &scan, &sessions );
+        REQUIRE( waitFor( [ &scan ]() { return scan.devices().size() == 2; } ) );
         auto* first = tileOf( sidebar, "emulator-5554" );
         auto* second = tileOf( sidebar, "emulator-5556" );
         REQUIRE( first );
@@ -361,8 +368,9 @@ SCENARIO( "a device that is not ready cannot be started from its tile", "[sideba
         installAdbWithAttachedDevices( host );
         DeviceStore store( host.configDir() + "/logcat.ini" );
         store.remember( { { "NOAUTH456", "unauthorized", {} } } );
+        DeviceScan scan;
         Sessions sessions;
-        const SidebarWidget sidebar( &store, &sessions );
+        const SidebarWidget sidebar( &store, &scan, &sessions );
         auto* tile = tileOf( sidebar, "NOAUTH456" );
         REQUIRE( tile );
         REQUIRE( tile->state() == TileState::Disconnected );
@@ -392,9 +400,10 @@ SCENARIO( "a device's own save path is set from its tile", "[sidebarwidget]" )
         installAdbWithAttachedDevices( host );
         attach( host, "emulator-5554  device\n" );
         DeviceStore store( host.configDir() + "/logcat.ini" );
+        DeviceScan scan;
         Sessions sessions;
-        const SidebarWidget sidebar( &store, &sessions );
-        REQUIRE( waitFor( [ &sessions ]() { return !sessions.devices().isEmpty(); } ) );
+        const SidebarWidget sidebar( &store, &scan, &sessions );
+        REQUIRE( waitFor( [ &scan ]() { return !scan.devices().isEmpty(); } ) );
         auto* tile = tileOf( sidebar, "emulator-5554" );
         REQUIRE( tile );
         REQUIRE( textOf( tile, "summary" ).contains( "log directory" ) );
@@ -431,9 +440,10 @@ SCENARIO( "the settings dialog opened from the tab sets the log directory and ad
         FakeHost host;
         installAdbWithAttachedDevices( host );
         DeviceStore store( host.configDir() + "/logcat.ini" );
+        DeviceScan scan;
         Sessions sessions;
-        const SidebarWidget sidebar( &store, &sessions );
-        REQUIRE( waitFor( [ &sessions ]() { return !sessions.isScanning(); } ) );
+        const SidebarWidget sidebar( &store, &scan, &sessions );
+        REQUIRE( waitFor( [ &scan ]() { return !scan.isScanning(); } ) );
 
         WHEN( "Settings… is clicked" )
         {
@@ -496,9 +506,10 @@ SCENARIO( "the sidebar follows the sessions as they start and stop", "[sidebarwi
         FakeHost host;
         logcat_test::installFakeAdb( host );
         DeviceStore store( host.configDir() + "/logcat.ini" );
+        DeviceScan scan;
         Sessions sessions;
-        const SidebarWidget sidebar( &store, &sessions );
-        REQUIRE( waitFor( [ &sessions ]() { return !sessions.devices().isEmpty(); } ) );
+        const SidebarWidget sidebar( &store, &scan, &sessions );
+        REQUIRE( waitFor( [ &scan ]() { return !scan.devices().isEmpty(); } ) );
         auto* tile = tileOf( sidebar, serial );
         REQUIRE( tile );
 
@@ -530,8 +541,9 @@ SCENARIO( "the sidebar follows the sessions as they start and stop", "[sidebarwi
         FakeHost host;
         logcat_test::installFakeAdb( host, "printf 'only\\n'\n" );
         DeviceStore store( host.configDir() + "/logcat.ini" );
+        DeviceScan scan;
         Sessions sessions;
-        const SidebarWidget sidebar( &store, &sessions );
+        const SidebarWidget sidebar( &store, &scan, &sessions );
         bool runningWhenStopped = true;
         QObject::connect( &sessions, &Sessions::sessionStopped,
                           [ &sidebar, &serial, &runningWhenStopped ]() {
@@ -561,8 +573,9 @@ SCENARIO( "the sidebar follows the sessions as they start and stop", "[sidebarwi
         FakeHost host;
         logcat_test::installFakeAdb( host );
         DeviceStore store( host.configDir() + "/logcat.ini" );
+        DeviceScan scan;
         Sessions sessions;
-        const SidebarWidget sidebar( &store, &sessions );
+        const SidebarWidget sidebar( &store, &scan, &sessions );
         const QString markup = "<b>emulator-5554</b>";
         REQUIRE( Qt::mightBeRichText( markup ) );
         REQUIRE( sessions.startSession( markup ) );
@@ -602,11 +615,12 @@ SCENARIO( "a running tile shows its session's details, live, and Rotate", "[side
             REQUIRE( file.open( QIODevice::WriteOnly ) );
         };
         DeviceStore store( host.configDir() + "/logcat.ini" );
+        DeviceScan scan;
         Sessions sessions;
-        SidebarWidget sidebar( &store, &sessions );
+        SidebarWidget sidebar( &store, &scan, &sessions );
         // The counters are polled only while the tab shows.
         sidebar.show();
-        REQUIRE( waitFor( [ &sessions ]() { return !sessions.devices().isEmpty(); } ) );
+        REQUIRE( waitFor( [ &scan ]() { return !scan.devices().isEmpty(); } ) );
         auto* tile = tileOf( sidebar, serial );
         REQUIRE( tile );
         auto* details = tile->findChild<QLabel*>( "details" );

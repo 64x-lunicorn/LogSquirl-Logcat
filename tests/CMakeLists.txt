@@ -22,6 +22,7 @@ add_executable(logsquirl_logcat_tests
     hostapi_test.cpp
     takelines_test.cpp
     sessions_test.cpp
+    devicescan_test.cpp
     devicewidget_test.cpp
     devicestore_test.cpp
     devicetile_test.cpp
@@ -60,6 +61,7 @@ target_sources(logsquirl_logcat_tests
         "${CMAKE_SOURCE_DIR}/src/adbprocess.cpp"
         "${CMAKE_SOURCE_DIR}/src/tempdirs.cpp"
         "${CMAKE_SOURCE_DIR}/src/sessions.cpp"
+        "${CMAKE_SOURCE_DIR}/src/devicescan.cpp"
         "${CMAKE_SOURCE_DIR}/src/devicewidget.cpp"
         "${CMAKE_SOURCE_DIR}/src/sidebarwidget.cpp"
         "${CMAKE_SOURCE_DIR}/src/deviceroster.cpp"

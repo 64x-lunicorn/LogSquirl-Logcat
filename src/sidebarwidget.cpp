@@ -32,6 +32,7 @@
 #include "sidebarwidget.h"
 
 #include "adbprocess.h"
+#include "devicescan.h"
 #include "devicestore.h"
 #include "devicetile.h"
 #include "plugin.h"
@@ -54,9 +55,11 @@ namespace logcat {
 
 // ── Construction ────────────────────────────────────────────────────────
 
-SidebarWidget::SidebarWidget( DeviceStore* store, Sessions* sessions, QWidget* parent )
+SidebarWidget::SidebarWidget( DeviceStore* store, DeviceScan* scan, Sessions* sessions,
+                              QWidget* parent )
     : QWidget( parent )
     , store_( store )
+    , scan_( scan )
     , sessions_( sessions )
     , stopAll_( new QPushButton( QStringLiteral( "■ Stop all" ), this ) )
     , empty_( new QLabel(
@@ -111,7 +114,7 @@ SidebarWidget::SidebarWidget( DeviceStore* store, Sessions* sessions, QWidget* p
     } );
 
     // ── Follow the devices and the sessions ──────────────────────────
-    connect( sessions_, &Sessions::devicesChanged, this,
+    connect( scan_, &DeviceScan::devicesChanged, this,
              [ this ] { guarded( "showing the devices", [ this ] { onDevicesChanged(); } ); } );
     connect( sessions_, &Sessions::sessionStarted, this,
              [ this ] { guarded( "showing a started capture", [ this ] { reload(); } ); } );
@@ -126,9 +129,8 @@ SidebarWidget::SidebarWidget( DeviceStore* store, Sessions* sessions, QWidget* p
     // (showEvent()).
     scanTimer_->setObjectName( "deviceScan" );
     scanTimer_->setInterval( kScanIntervalMs );
-    connect( scanTimer_, &QTimer::timeout, this, [ this ] {
-        guarded( "refreshing the devices", [ this ] { sessions_->refreshDevices(); } );
-    } );
+    connect( scanTimer_, &QTimer::timeout, this,
+             [ this ] { guarded( "refreshing the devices", [ this ] { scan_->refresh(); } ); } );
 
     // A running session's lines emit no signal: its tile polls them, while
     // the tab shows.
@@ -139,7 +141,7 @@ SidebarWidget::SidebarWidget( DeviceStore* store, Sessions* sessions, QWidget* p
 
     clock_.start();
 
-    // Sessions has started the first device scan; devicesChanged() fills
+    // The scan has started the first device scan; devicesChanged() fills
     // in the result.
     onDevicesChanged();
 }
@@ -151,7 +153,7 @@ void SidebarWidget::showEvent( QShowEvent* event )
     QWidget::showEvent( event );
     // The devices and the counters may have changed while it was hidden.
     guarded( "showing the Logcat tab", [ this ] {
-        sessions_->refreshDevices();
+        scan_->refresh();
         pollCounters();
         scanTimer_->start();
         pollTimer_->start();
@@ -169,7 +171,7 @@ void SidebarWidget::hideEvent( QHideEvent* event )
 
 void SidebarWidget::onDevicesChanged()
 {
-    store_->remember( sessions_->attachedDevices() );
+    store_->remember( scan_->attachedDevices() );
     reload();
 }
 
@@ -190,8 +192,8 @@ void SidebarWidget::showRoster( std::optional<qint64> pollAtMs )
     for ( const auto& serial : active ) {
         running.append( { serial, sessions_->filePath( serial ), sessions_->counters( serial ) } );
     }
-    const auto roster = deviceRoster( store_->list(), sessions_->attachedDevices(), running,
-                                      samples_, QDateTime::currentDateTime(), pollAtMs );
+    const auto roster = deviceRoster( store_->list(), scan_->attachedDevices(), running, samples_,
+                                      QDateTime::currentDateTime(), pollAtMs );
     samples_ = roster.samples;
 
     QStringList serials;
@@ -258,7 +260,7 @@ DeviceTile* SidebarWidget::tileFor( const QString& serial )
 void SidebarWidget::start( const QString& serial )
 {
     // Its tile may still show it connected for a moment after it is not.
-    if ( !sessions_->devices().contains( serial ) ) {
+    if ( !scan_->devices().contains( serial ) ) {
         return;
     }
     sessions_->startSession( serial, store_->savePathFor( serial ) );
@@ -325,7 +327,7 @@ void SidebarWidget::editSavePath( const QString& serial )
 
 void SidebarWidget::openSettings()
 {
-    auto* dialog = new SettingsDialog( store_, sessions_, this );
+    auto* dialog = new SettingsDialog( store_, scan_, this );
     dialog->setAttribute( Qt::WA_DeleteOnClose );
     dialog->open();
 }
