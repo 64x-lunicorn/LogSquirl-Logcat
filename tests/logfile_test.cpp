@@ -154,6 +154,8 @@ SCENARIO( "a log file opens a save path by appending to it", "[logfile]" )
         }
     }
 
+    // Only Unix takes the home directory from HOME; Windows asks the system.
+#ifdef Q_OS_UNIX
     GIVEN( "a save path in the home directory, given with ~" )
     {
         QTemporaryDir home;
@@ -172,6 +174,7 @@ SCENARIO( "a log file opens a save path by appending to it", "[logfile]" )
             }
         }
     }
+#endif
 
     GIVEN( "a relative save path" )
     {
@@ -387,6 +390,8 @@ SCENARIO( "a log file rotates to a new file", "[logfile]" )
         }
     }
 
+    // Only Unix takes the home directory from HOME; Windows asks the system.
+#ifdef Q_OS_UNIX
     GIVEN( "a file written to a save path in the home directory, given with ~" )
     {
         QTemporaryDir home;
@@ -408,6 +413,7 @@ SCENARIO( "a log file rotates to a new file", "[logfile]" )
             }
         }
     }
+#endif
 
     GIVEN( "a file in a temporary directory" )
     {
