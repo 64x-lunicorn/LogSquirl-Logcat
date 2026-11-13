@@ -41,6 +41,8 @@
 #include <QString>
 
 #include <cstddef>
+#include <exception>
+#include <utility>
 
 namespace logcat {
 class DeviceStore;
@@ -85,5 +87,28 @@ void hostLog( int level, const QString& message );
 /// Convenience: show a host notification.  No-op if the plugin is not
 /// initialised.  The host decodes the message as UTF-8.
 void hostNotify( const QString& message );
+
+/// Log through the host that @p what failed, for @p reason.  Never throws.
+void logFailure( const char* what, const char* reason ) noexcept;
+
+/// Run @p work for the host, logging instead of throwing: the host is C,
+/// and an exception escaping into it would terminate LogSquirl.  Every
+/// entry point, host callback and Qt signal handler runs its work through
+/// it.  @p what names the work in the log ("<what> failed: <reason>").
+/// Returns false if it threw; a handler that must return a value returns
+/// a default then.
+template <typename Work>
+bool guarded( const char* what, Work&& work ) noexcept
+{
+    try {
+        std::forward<Work>( work )();
+        return true;
+    } catch ( const std::exception& e ) {
+        logFailure( what, e.what() );
+    } catch ( ... ) {
+        logFailure( what, "unknown exception" );
+    }
+    return false;
+}
 
 } // namespace logcat

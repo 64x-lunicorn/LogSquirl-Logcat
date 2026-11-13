@@ -104,13 +104,21 @@ AdbProcess::AdbProcess( const QString& serial, const QString& savePath, QObject*
     , process_( new QProcess( this ) )
     , tempDir_( tempDirTemplate( tempRoot() ) )
 {
-    // Connect QProcess signals to our slots
-    connect( process_, &QProcess::readyReadStandardOutput, this, &AdbProcess::onReadyRead );
-    connect( process_, &QProcess::readyReadStandardError, this,
-             &AdbProcess::onReadyReadStandardError );
+    // Connect QProcess signals to our slots, each through guarded(): an
+    // exception must not unwind through Qt's event loop into the host.
+    connect( process_, &QProcess::readyReadStandardOutput, this,
+             [ this ]() { guarded( "capturing logcat output", [ this ] { onReadyRead(); } ); } );
+    connect( process_, &QProcess::readyReadStandardError, this, [ this ]() {
+        guarded( "reading what adb reported", [ this ] { onReadyReadStandardError(); } );
+    } );
     connect( process_, QOverload<int, QProcess::ExitStatus>::of( &QProcess::finished ), this,
-             &AdbProcess::onFinished );
-    connect( process_, &QProcess::errorOccurred, this, &AdbProcess::onErrorOccurred );
+             [ this ]( int exitCode, QProcess::ExitStatus exitStatus ) {
+                 guarded( "ending a logcat capture",
+                          [ this, exitCode, exitStatus ] { onFinished( exitCode, exitStatus ); } );
+             } );
+    connect( process_, &QProcess::errorOccurred, this, [ this ]( QProcess::ProcessError error ) {
+        guarded( "reporting an adb error", [ this, error ] { onErrorOccurred( error ); } );
+    } );
 }
 
 AdbProcess::~AdbProcess()
@@ -639,7 +647,10 @@ void AdbProcess::failWrite()
     Q_EMIT errorOccurred( QString( "Could not write the log file %1 (%2); logcat stopped." )
                               .arg( logPath_, tempFile_.errorString() ) );
     // Not from inside the slot that is reading adb's output.
-    QMetaObject::invokeMethod( this, &AdbProcess::stop, Qt::QueuedConnection );
+    QMetaObject::invokeMethod(
+        this,
+        [ this ]() { guarded( "stopping a capture whose log file failed", [ this ] { stop(); } ); },
+        Qt::QueuedConnection );
 }
 
 bool AdbProcess::openLogFile( const QString& path, QIODevice::OpenMode mode, QString& error )

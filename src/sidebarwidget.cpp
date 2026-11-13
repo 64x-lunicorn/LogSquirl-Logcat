@@ -221,30 +221,43 @@ SidebarWidget::SidebarWidget( DeviceStore* store, Sessions* sessions, QWidget* p
     layout->addLayout( buttons );
     layout->addWidget( scroll, 1 );
 
-    connect( settings, &QPushButton::clicked, this, &SidebarWidget::openSettings );
+    // Each handler runs through guarded(): an exception must not unwind
+    // through Qt's event loop into the host.
+    connect( settings, &QPushButton::clicked, this,
+             [ this ] { guarded( "opening the settings", [ this ] { openSettings(); } ); } );
     connect( stopAll_, &QPushButton::clicked, this, [ this ] {
-        sessions_->stopAll();
-        hostNotify( "All logcat sessions stopped." );
+        guarded( "stopping all captures", [ this ] {
+            sessions_->stopAll();
+            hostNotify( "All logcat sessions stopped." );
+        } );
     } );
 
     // ── Follow the devices and the sessions ──────────────────────────
-    connect( sessions_, &Sessions::devicesChanged, this, &SidebarWidget::onDevicesChanged );
-    connect( sessions_, &Sessions::sessionStarted, this, &SidebarWidget::reload );
-    connect( sessions_, &Sessions::sessionStopped, this, &SidebarWidget::reload );
-    connect( sessions_, &Sessions::sessionChanged, this, &SidebarWidget::reload );
-    connect( store_, &DeviceStore::changed, this, &SidebarWidget::reload );
+    connect( sessions_, &Sessions::devicesChanged, this,
+             [ this ] { guarded( "showing the devices", [ this ] { onDevicesChanged(); } ); } );
+    connect( sessions_, &Sessions::sessionStarted, this,
+             [ this ] { guarded( "showing a started capture", [ this ] { reload(); } ); } );
+    connect( sessions_, &Sessions::sessionStopped, this,
+             [ this ] { guarded( "showing a stopped capture", [ this ] { reload(); } ); } );
+    connect( sessions_, &Sessions::sessionChanged, this,
+             [ this ] { guarded( "showing a rotated log", [ this ] { reload(); } ); } );
+    connect( store_, &DeviceStore::changed, this,
+             [ this ] { guarded( "showing the known devices", [ this ] { reload(); } ); } );
 
     // A device plugged in or unplugged shows by itself, while the tab shows
     // (showEvent()).
     scanTimer_->setObjectName( "deviceScan" );
     scanTimer_->setInterval( kScanIntervalMs );
-    connect( scanTimer_, &QTimer::timeout, sessions_, &Sessions::refreshDevices );
+    connect( scanTimer_, &QTimer::timeout, this, [ this ] {
+        guarded( "refreshing the devices", [ this ] { sessions_->refreshDevices(); } );
+    } );
 
     // A running session's lines emit no signal: its tile polls them, while
     // the tab shows.
     pollTimer_->setObjectName( "counterPoll" );
     pollTimer_->setInterval( kCounterPollMs );
-    connect( pollTimer_, &QTimer::timeout, this, &SidebarWidget::pollCounters );
+    connect( pollTimer_, &QTimer::timeout, this,
+             [ this ] { guarded( "showing the line counts", [ this ] { pollCounters(); } ); } );
 
     // Sessions has started the first device scan; devicesChanged() fills
     // in the result.
@@ -257,17 +270,21 @@ void SidebarWidget::showEvent( QShowEvent* event )
 {
     QWidget::showEvent( event );
     // The devices and the counters may have changed while it was hidden.
-    sessions_->refreshDevices();
-    pollCounters();
-    scanTimer_->start();
-    pollTimer_->start();
+    guarded( "showing the Logcat tab", [ this ] {
+        sessions_->refreshDevices();
+        pollCounters();
+        scanTimer_->start();
+        pollTimer_->start();
+    } );
 }
 
 void SidebarWidget::hideEvent( QHideEvent* event )
 {
     QWidget::hideEvent( event );
-    scanTimer_->stop();
-    pollTimer_->stop();
+    guarded( "hiding the Logcat tab", [ this ] {
+        scanTimer_->stop();
+        pollTimer_->stop();
+    } );
 }
 
 void SidebarWidget::onDevicesChanged()
@@ -338,15 +355,21 @@ DeviceTile* SidebarWidget::tileFor( const QString& serial )
         return tile;
     }
     auto* tile = new DeviceTile( serial, this );
-    connect( tile, &DeviceTile::startClicked, this, [ this, serial ] { start( serial ); } );
-    connect( tile, &DeviceTile::stopClicked, this,
-             [ this, serial ] { sessions_->stopSession( serial ); } );
-    connect( tile, &DeviceTile::rotateClicked, this,
-             [ this, serial ] { sessions_->rotateSession( serial ); } );
-    connect( tile, &DeviceTile::savePathClicked, this,
-             [ this, serial ] { editSavePath( serial ); } );
-    connect( tile, &DeviceTile::forgetClicked, this,
-             [ this, serial ] { store_->forget( serial ); } );
+    connect( tile, &DeviceTile::startClicked, this, [ this, serial ] {
+        guarded( "starting a capture", [ this, &serial ] { start( serial ); } );
+    } );
+    connect( tile, &DeviceTile::stopClicked, this, [ this, serial ] {
+        guarded( "stopping a capture", [ this, &serial ] { sessions_->stopSession( serial ); } );
+    } );
+    connect( tile, &DeviceTile::rotateClicked, this, [ this, serial ] {
+        guarded( "rotating a log", [ this, &serial ] { sessions_->rotateSession( serial ); } );
+    } );
+    connect( tile, &DeviceTile::savePathClicked, this, [ this, serial ] {
+        guarded( "editing a save path", [ this, &serial ] { editSavePath( serial ); } );
+    } );
+    connect( tile, &DeviceTile::forgetClicked, this, [ this, serial ] {
+        guarded( "forgetting a device", [ this, &serial ] { store_->forget( serial ); } );
+    } );
     tileBySerial_.insert( serial, tile );
     return tile;
 }
@@ -466,20 +489,29 @@ void SidebarWidget::editSavePath( const QString& serial )
     layout->addLayout( row );
     layout->addWidget( buttons );
 
-    connect( buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept );
-    connect( buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject );
-    connect( browse, &QPushButton::clicked, dialog, [ dialog, edit ] {
-        // An existing file is appended to, not replaced, so don't ask to replace it.
-        const auto path = QFileDialog::getSaveFileName(
-            dialog, QStringLiteral( "Save logcat output" ), edit->text(),
-            QStringLiteral( "Log files (*.log *.txt);;All files (*)" ), nullptr,
-            QFileDialog::DontConfirmOverwrite );
-        if ( !path.isEmpty() ) {
-            edit->setText( path );
-        }
+    // Each handler runs through guarded(), as the constructor's.
+    connect( buttons, &QDialogButtonBox::accepted, dialog,
+             [ dialog ] { guarded( "saving the save path", [ dialog ] { dialog->accept(); } ); } );
+    connect( buttons, &QDialogButtonBox::rejected, dialog, [ dialog ] {
+        guarded( "cancelling the save path dialog", [ dialog ] { dialog->reject(); } );
     } );
-    connect( dialog, &QDialog::accepted, this,
-             [ this, serial, edit ] { store_->setSavePath( serial, edit->text().trimmed() ); } );
+    connect( browse, &QPushButton::clicked, dialog, [ dialog, edit ] {
+        guarded( "choosing a save path", [ dialog, edit ] {
+            // An existing file is appended to, not replaced, so don't ask to replace it.
+            const auto path = QFileDialog::getSaveFileName(
+                dialog, QStringLiteral( "Save logcat output" ), edit->text(),
+                QStringLiteral( "Log files (*.log *.txt);;All files (*)" ), nullptr,
+                QFileDialog::DontConfirmOverwrite );
+            if ( !path.isEmpty() ) {
+                edit->setText( path );
+            }
+        } );
+    } );
+    connect( dialog, &QDialog::accepted, this, [ this, serial, edit ] {
+        guarded( "saving a save path", [ this, &serial, edit ] {
+            store_->setSavePath( serial, edit->text().trimmed() );
+        } );
+    } );
 
     dialog->open();
 }

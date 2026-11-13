@@ -133,22 +133,43 @@ DeviceWidget::DeviceWidget( Sessions* sessions, QWidget* parent )
     mainLayout->addStretch();
 
     // ── Connect signals ──────────────────────────────────────────────
-    connect( refreshButton_, &QPushButton::clicked, sessions_, &Sessions::refreshDevices );
-    connect( startButton_, &QPushButton::clicked, this, &DeviceWidget::startCapture );
-    connect( stopButton_, &QPushButton::clicked, this, &DeviceWidget::stopCapture );
-    connect( stopAllButton_, &QPushButton::clicked, this, &DeviceWidget::stopAllCaptures );
-    connect( browseButton_, &QPushButton::clicked, this, &DeviceWidget::browseSavePath );
-    connect( adbConfigButton_, &QPushButton::clicked, this,
-             [ this ]() { configureAdbPath( this ); } );
-    connect( saveCheckBox_, &QCheckBox::toggled, savePathEdit_, &QLineEdit::setEnabled );
-    connect( saveCheckBox_, &QCheckBox::toggled, browseButton_, &QPushButton::setEnabled );
-    connect( deviceCombo_, &QComboBox::currentIndexChanged, this, [ this ]() { updateUiState(); } );
+    // Each handler runs through guarded(): an exception must not unwind
+    // through Qt's event loop into the host.
+    connect( refreshButton_, &QPushButton::clicked, this, [ this ]() {
+        guarded( "refreshing the devices", [ this ] { sessions_->refreshDevices(); } );
+    } );
+    connect( startButton_, &QPushButton::clicked, this,
+             [ this ]() { guarded( "starting a capture", [ this ] { startCapture(); } ); } );
+    connect( stopButton_, &QPushButton::clicked, this,
+             [ this ]() { guarded( "stopping a capture", [ this ] { stopCapture(); } ); } );
+    connect( stopAllButton_, &QPushButton::clicked, this,
+             [ this ]() { guarded( "stopping all captures", [ this ] { stopAllCaptures(); } ); } );
+    connect( browseButton_, &QPushButton::clicked, this,
+             [ this ]() { guarded( "choosing the save path", [ this ] { browseSavePath(); } ); } );
+    connect( adbConfigButton_, &QPushButton::clicked, this, [ this ]() {
+        guarded( "configuring the ADB path", [ this ] { configureAdbPath( this ); } );
+    } );
+    connect( saveCheckBox_, &QCheckBox::toggled, this, [ this ]( bool checked ) {
+        guarded( "switching saving to a file", [ this, checked ] {
+            savePathEdit_->setEnabled( checked );
+            browseButton_->setEnabled( checked );
+        } );
+    } );
+    connect( deviceCombo_, &QComboBox::currentIndexChanged, this,
+             [ this ]() { guarded( "selecting a device", [ this ] { updateUiState(); } ); } );
 
     // ── Follow the sessions ──────────────────────────────────────────
-    connect( sessions_, &Sessions::devicesChanged, this, &DeviceWidget::updateDeviceCombo );
-    connect( sessions_, &Sessions::scanningChanged, this, &DeviceWidget::updateRefreshButton );
-    connect( sessions_, &Sessions::sessionStarted, this, &DeviceWidget::updateDeviceCombo );
-    connect( sessions_, &Sessions::sessionStopped, this, &DeviceWidget::updateDeviceCombo );
+    connect( sessions_, &Sessions::devicesChanged, this,
+             [ this ]() { guarded( "showing the devices", [ this ] { updateDeviceCombo(); } ); } );
+    connect( sessions_, &Sessions::scanningChanged, this, [ this ]() {
+        guarded( "showing the device scan", [ this ] { updateRefreshButton(); } );
+    } );
+    connect( sessions_, &Sessions::sessionStarted, this, [ this ]() {
+        guarded( "showing a started capture", [ this ] { updateDeviceCombo(); } );
+    } );
+    connect( sessions_, &Sessions::sessionStopped, this, [ this ]() {
+        guarded( "showing a stopped capture", [ this ] { updateDeviceCombo(); } );
+    } );
 
     // Sessions has started the first device scan; devicesChanged() fills
     // in the result.

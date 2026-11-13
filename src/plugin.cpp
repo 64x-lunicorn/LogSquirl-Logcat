@@ -45,9 +45,10 @@
  *      logcat sessions, delete the DeviceWidget, the Sessions and the
  *      DeviceStore, and clear state.
  *
- * No exception may leave an entry point or a host callback: the host is C,
- * and an exception escaping into it terminates LogSquirl.  Their work runs
- * through guarded(), which logs the failure instead.
+ * No exception may leave an entry point, a host callback or a Qt signal
+ * handler: the host is C, and an exception escaping into it terminates
+ * LogSquirl.  Their work runs through guarded() (plugin.h), which logs the
+ * failure instead.
  *
  * @see logsquirl_plugin_api.h for the full host API reference.
  */
@@ -63,8 +64,6 @@
 
 #include <QApplication>
 #include <QWindow>
-
-#include <exception>
 
 // ── Global state ─────────────────────────────────────────────────────────
 
@@ -84,7 +83,19 @@ void hostNotify( const QString& message )
         g_state.api->show_notification( g_state.handle, message.toUtf8().constData() );
     }
 }
+
+void logFailure( const char* what, const char* reason ) noexcept
+{
+    try {
+        hostLog( LOGSQUIRL_LOG_ERROR, QStringLiteral( "Logcat plugin: %1 failed: %2" )
+                                          .arg( what, QString::fromUtf8( reason ) ) );
+    } catch ( ... ) {
+        // Nothing left to report it with.
+    }
+}
 } // namespace logcat
+
+using logcat::guarded;
 
 // ── Plugin metadata ──────────────────────────────────────────────────────
 
@@ -99,36 +110,6 @@ static const LogSquirlPluginInfo kPluginInfo = {
     /* type        */ LOGSQUIRL_PLUGIN_UI,
     /* api_version */ LOGSQUIRL_PLUGIN_API_VERSION,
 };
-
-// ── Internal helpers ─────────────────────────────────────────────────────
-
-/// Log that work for the host failed.
-static void logFailure( const char* what, const char* reason ) noexcept
-{
-    try {
-        logcat::hostLog( LOGSQUIRL_LOG_ERROR, QStringLiteral( "Logcat plugin: %1 failed: %2" )
-                                                  .arg( what, QString::fromUtf8( reason ) ) );
-    } catch ( ... ) {
-        // Nothing left to report it with.
-    }
-}
-
-/// Run work for the host, logging instead of throwing: the host is C, and
-/// an exception escaping into it would terminate LogSquirl.
-/// Returns false if it threw.
-template <typename Work>
-static bool guarded( const char* what, Work&& work ) noexcept
-{
-    try {
-        work();
-        return true;
-    } catch ( const std::exception& e ) {
-        logFailure( what, e.what() );
-    } catch ( ... ) {
-        logFailure( what, "unknown exception" );
-    }
-    return false;
-}
 
 // ── Menu action callback ─────────────────────────────────────────────────
 
@@ -232,8 +213,9 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init_ex( const LogSquirlHostApi* ap
         // with the tabs left open; only in the first case may the temporary
         // files go.
         if ( auto* app = QCoreApplication::instance() ) {
-            QObject::connect( app, &QCoreApplication::aboutToQuit, logcat::g_state.sessions,
-                              []() { logcat::g_state.quitting = true; } );
+            QObject::connect( app, &QCoreApplication::aboutToQuit, logcat::g_state.sessions, []() {
+                guarded( "preparing to quit", [] { logcat::g_state.quitting = true; } );
+            } );
         }
 
         // The devices seen before, remembered in logcat.ini, and the log
