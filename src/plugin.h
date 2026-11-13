@@ -49,6 +49,7 @@ class DeviceScan;
 class DeviceStore;
 class DeviceWidget;
 class Sessions;
+class Settings;
 class SidebarWidget;
 } // namespace logcat
 
@@ -64,9 +65,10 @@ namespace logcat {
 struct PluginState {
     const LogSquirlHostApi* api = nullptr;  ///< Host API function table.
     void* handle = nullptr;                 ///< Opaque plugin instance handle.
+    Settings* settings = nullptr;           ///< logcat.ini: the adb, and the log directory.
     DeviceScan* scan = nullptr;             ///< The devices adb lists.
     Sessions* sessions = nullptr;           ///< The logcat session of each device.
-    DeviceStore* store = nullptr;           ///< The devices seen before, and the log directory.
+    DeviceStore* store = nullptr;           ///< The devices seen before.
     DeviceWidget* dialog = nullptr;         ///< Logcat session dialog, a view of scan and sessions.
     SidebarWidget* sidebarWidget = nullptr; ///< Sidebar tab, a view of scan, sessions and store.
     bool sidebarTabRegistered = false;      ///< The host holds sidebarWidget as a tab.

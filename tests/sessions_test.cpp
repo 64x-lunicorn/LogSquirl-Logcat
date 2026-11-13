@@ -79,7 +79,7 @@ SCENARIO( "a session is only accepted when adb starts", "[sessions]" )
     {
         FakeHost host;
         logcat_test::installBrokenAdb( host );
-        Sessions sessions;
+        Sessions sessions( &host.settings() );
         QTemporaryDir logDir;
 
         WHEN( "starting a session with a save path" )
@@ -112,7 +112,7 @@ SCENARIO( "a session is only accepted when adb starts", "[sessions]" )
     {
         FakeHost host;
         logcat_test::installFakeAdb( host );
-        Sessions sessions;
+        Sessions sessions( &host.settings() );
 
         WHEN( "starting a session" )
         {
@@ -138,7 +138,7 @@ SCENARIO( "two sessions never write to the same file", "[sessions]" )
     {
         FakeHost host;
         logcat_test::installFakeAdb( host );
-        Sessions sessions;
+        Sessions sessions( &host.settings() );
         QTemporaryDir logDir;
         const auto savePath = logDir.filePath( "capture.log" );
         REQUIRE( sessions.startSession( "emulator-5554", savePath ) );
@@ -165,7 +165,7 @@ SCENARIO( "two sessions never write to the same file", "[sessions]" )
         logcat_test::installFakeAdb( host );
         QTemporaryDir home;
         const logcat_test::ScopedEnv homeEnv( "HOME", QFile::encodeName( home.path() ) );
-        Sessions sessions;
+        Sessions sessions( &host.settings() );
         REQUIRE( sessions.startSession( "emulator-5554", "~/capture.log" ) );
 
         WHEN( "starting a second device with the file's full path" )
@@ -196,7 +196,7 @@ SCENARIO( "two sessions never write to the same file", "[sessions]" )
     {
         FakeHost host;
         logcat_test::installFakeAdb( host );
-        Sessions sessions;
+        Sessions sessions( &host.settings() );
         QTemporaryDir logDir;
         const auto savePath = logDir.filePath( "capture.log" );
         REQUIRE( sessions.startSession( "emulator-5554", savePath ) );
@@ -237,7 +237,7 @@ SCENARIO( "stopping a session is not reported as an error", "[sessions]" )
     {
         FakeHost host;
         logcat_test::installFakeAdb( host );
-        Sessions sessions;
+        Sessions sessions( &host.settings() );
         REQUIRE( sessions.startSession( "emulator-5554" ) );
         host.notifications.clear();
 
@@ -267,7 +267,7 @@ SCENARIO( "a failed rotation is reported once", "[sessions]" )
 
         FakeHost host;
         logcat_test::installFakeAdb( host );
-        Sessions sessions;
+        Sessions sessions( &host.settings() );
         QTemporaryDir logDir;
         REQUIRE( sessions.startSession( "emulator-5554", logDir.filePath( "capture.log" ) ) );
         host.notifications.clear();
@@ -300,7 +300,7 @@ SCENARIO( "stopAll keeps temporary log files for their tabs", "[sessions]" )
     {
         FakeHost host;
         logcat_test::installFakeAdb( host );
-        auto* sessions = new Sessions;
+        auto* sessions = new Sessions( &host.settings() );
         REQUIRE( sessions->startSession( "emulator-5554" ) );
         REQUIRE( host.openedFiles.size() == 1 );
         const auto tempFile = host.openedFiles.first();
@@ -331,7 +331,7 @@ SCENARIO( "stopAll keeps temporary log files for their tabs", "[sessions]" )
     {
         FakeHost host;
         logcat_test::installFakeAdb( host );
-        auto* sessions = new Sessions;
+        auto* sessions = new Sessions( &host.settings() );
         REQUIRE( sessions->startSession( "emulator-5554" ) );
         sessions->rotateSession( "emulator-5554" );
         REQUIRE( host.openedFiles.size() == 2 );
@@ -367,7 +367,7 @@ SCENARIO( "a session's files are kept for their tabs until LogSquirl quits", "[s
     {
         FakeHost host;
         logcat_test::installFakeAdb( host );
-        Sessions sessions;
+        Sessions sessions( &host.settings() );
         REQUIRE( sessions.startSession( serial ) );
         const auto file = sessions.filePath( serial );
 
@@ -436,7 +436,7 @@ SCENARIO( "a session's files are kept for their tabs until LogSquirl quits", "[s
     {
         FakeHost host;
         logcat_test::installFakeAdb( host, "printf 'only\\n'\n" );
-        Sessions sessions;
+        Sessions sessions( &host.settings() );
         const SignalLog log( sessions );
         REQUIRE( sessions.startSession( serial ) );
         const auto file = sessions.filePath( serial );
@@ -465,7 +465,7 @@ SCENARIO( "stopping all sessions waits for them together", "[sessions]" )
         FakeHost host;
         // sleep inherits the ignored SIGTERM, so only kill ends it.
         logcat_test::installFakeAdb( host, "trap '' TERM\nprintf 'first\\n'\nexec sleep 30\n" );
-        auto* sessions = new Sessions;
+        auto* sessions = new Sessions( &host.settings() );
         constexpr int kSessions = 6;
         QStringList serials;
         for ( int i = 0; i < kSessions; ++i ) {
@@ -514,7 +514,7 @@ SCENARIO( "a session's counters can be read while it runs", "[sessions]" )
     {
         FakeHost host;
         logcat_test::installFakeAdb( host ); // "first\r\nsecond\n"
-        Sessions sessions;
+        Sessions sessions( &host.settings() );
 
         THEN( "before it starts, its counters are all zero" )
         {
@@ -569,7 +569,7 @@ SCENARIO( "a session's counters can be read while it runs", "[sessions]" )
     {
         FakeHost host;
         logcat_test::installFakeAdb( host );
-        Sessions sessions;
+        Sessions sessions( &host.settings() );
         QTemporaryDir logDir;
         const auto savePath = logDir.filePath( "capture.log" );
         {
@@ -596,7 +596,7 @@ SCENARIO( "a session's counters can be read while it runs", "[sessions]" )
         FakeHost host;
         const auto trigger = host.configDir() + "/go";
         logcat_test::installFakeAdb( host, logcat_test::scriptWaitingFor( trigger ) );
-        Sessions sessions;
+        Sessions sessions( &host.settings() );
         REQUIRE( sessions.startSession( serial ) );
         REQUIRE( waitFor( [ & ]() { return sessions.counters( serial ).lines == 1; } ) );
 
@@ -647,7 +647,7 @@ SCENARIO( "Sessions says when a session starts, stops or changes", "[sessions]" 
     {
         FakeHost host;
         logcat_test::installBrokenAdb( host );
-        Sessions sessions;
+        Sessions sessions( &host.settings() );
         const SignalLog log( sessions );
 
         WHEN( "a session fails to start" )
@@ -668,7 +668,7 @@ SCENARIO( "Sessions says when a session starts, stops or changes", "[sessions]" 
     {
         FakeHost host;
         logcat_test::installFakeAdb( host );
-        Sessions sessions;
+        Sessions sessions( &host.settings() );
         const SignalLog log( sessions );
         bool runningWhenAnnounced = false;
         QObject::connect( &sessions, &Sessions::sessionStarted, [ & ]( const QString& started ) {
@@ -729,7 +729,7 @@ SCENARIO( "Sessions says when a session starts, stops or changes", "[sessions]" 
     {
         FakeHost host;
         logcat_test::installFakeAdb( host, "printf 'only\\n'\n" );
-        Sessions sessions;
+        Sessions sessions( &host.settings() );
         const SignalLog log( sessions );
 
         WHEN( "its session runs until adb exits" )

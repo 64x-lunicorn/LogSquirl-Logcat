@@ -153,7 +153,7 @@ SCENARIO( "the device scan knows every attached device, its state and its model"
         FakeHost host;
         const auto adb = logcat_test::installBrokenAdb( host ); // only its path is used
         auto* runner = new FakeAdbDevices;
-        DeviceScan scan( runner );
+        DeviceScan scan( &host.settings(), runner );
         const ScanLog log( scan );
 
         THEN( "it scans with the configured adb, and knows no device yet" )
@@ -215,7 +215,7 @@ SCENARIO( "refreshes requested during a scan are folded into one more scan", "[d
         FakeHost host;
         logcat_test::installBrokenAdb( host );
         auto* runner = new FakeAdbDevices;
-        DeviceScan scan( runner );
+        DeviceScan scan( &host.settings(), runner );
         const ScanLog log( scan );
 
         WHEN( "two refreshes are requested while it runs" )
@@ -269,19 +269,18 @@ SCENARIO( "a restart abandons the running scan, whose result is stale", "[device
         FakeHost host;
         logcat_test::installBrokenAdb( host );
         auto* runner = new FakeAdbDevices;
-        DeviceScan scan( runner );
+        DeviceScan scan( &host.settings(), runner );
         scan.refresh();
         const ScanLog log( scan );
 
-        WHEN( "the ADB path changes, and the scan is restarted" )
+        WHEN( "the ADB path is set in the settings, which restarts the scan" )
         {
             const auto otherAdb = host.configDir() + "/other-adb";
             {
                 QFile file( otherAdb );
                 REQUIRE( file.open( QIODevice::WriteOnly ) );
             }
-            logcat_test::useAdb( host, otherAdb );
-            scan.restart();
+            REQUIRE( host.settings().setAdbPathOverride( otherAdb ) );
 
             THEN( "the hanging run is abandoned, unreported, and the new adb runs" )
             {
@@ -307,15 +306,14 @@ SCENARIO( "a restart abandons the running scan, whose result is stale", "[device
         }
 
 #ifdef Q_OS_UNIX
-        WHEN( "the ADB path changes to one where no adb can be found, and the scan is restarted" )
+        WHEN( "the ADB path changes to one where no adb can be found, which restarts the scan" )
         {
             const NoAdbAnywhere noAdb;
             logcat_test::useAdb( host, host.configDir() + "/missing-adb" );
-            if ( !logcat::AdbProcess::findAdb().isEmpty() ) {
+            if ( !host.settings().findAdb().isEmpty() ) {
                 WARN( "An adb is installed in a well-known location; skipped." );
                 return;
             }
-            scan.restart();
 
             THEN( "no scan runs any more, and that is announced" )
             {
@@ -334,7 +332,7 @@ SCENARIO( "a restart abandons the running scan, whose result is stale", "[device
         FakeHost host;
         logcat_test::installBrokenAdb( host );
         auto* runner = new FakeAdbDevices;
-        DeviceScan scan( runner );
+        DeviceScan scan( &host.settings(), runner );
         runner->listOne( "emulator-5554" );
 
         WHEN( "it is restarted" )
@@ -358,7 +356,7 @@ SCENARIO( "a scan that hangs is given up after 10 s", "[devicescan]" )
         FakeHost host;
         logcat_test::installBrokenAdb( host );
         auto* runner = new FakeAdbDevices;
-        DeviceScan scan( runner );
+        DeviceScan scan( &host.settings(), runner );
         runner->listOne( "emulator-5554" );
         scan.refresh();
         const ScanLog log( scan );
@@ -409,7 +407,7 @@ SCENARIO( "a scan that hangs is given up after 10 s", "[devicescan]" )
         logcat_test::installBrokenAdb( host );
         auto* runner = new FakeAdbDevices;
         runner->failOnStart = "adb devices could not be started: not executable";
-        DeviceScan scan( runner );
+        DeviceScan scan( &host.settings(), runner );
 
         THEN( "no timeout is pending, and no scan runs" )
         {
@@ -429,7 +427,7 @@ SCENARIO( "a device scan that keeps failing is logged once", "[devicescan]" )
         FakeHost host;
         logcat_test::installBrokenAdb( host );
         auto* runner = new FakeAdbDevices;
-        DeviceScan scan( runner );
+        DeviceScan scan( &host.settings(), runner );
         runner->fail( "adb devices failed: daemon not running" );
         const auto scanFailing = [ &scan, runner ]( const QString& message, int times ) {
             for ( int i = 0; i < times; ++i ) {
@@ -492,7 +490,7 @@ SCENARIO( "a device scan that keeps failing is logged once", "[devicescan]" )
         FakeHost host;
         logcat_test::installBrokenAdb( host );
         auto* runner = new FakeAdbDevices;
-        DeviceScan scan( runner );
+        DeviceScan scan( &host.settings(), runner );
         runner->listOne( "emulator-5554" );
 
         WHEN( "the devices change" )
@@ -514,12 +512,12 @@ SCENARIO( "a device scan that keeps failing is logged once", "[devicescan]" )
         FakeHost host;
         const NoAdbAnywhere noAdb;
         logcat_test::useAdb( host, host.configDir() + "/missing-adb" );
-        if ( !logcat::AdbProcess::findAdb().isEmpty() ) {
+        if ( !host.settings().findAdb().isEmpty() ) {
             WARN( "An adb is installed in a well-known location; skipped." );
             return;
         }
         auto* runner = new FakeAdbDevices;
-        DeviceScan scan( runner );
+        DeviceScan scan( &host.settings(), runner );
 
         WHEN( "the devices are scanned again and again" )
         {
@@ -545,7 +543,7 @@ SCENARIO( "the scan says when \"Scanning…\" begins and ends", "[devicescan]" )
         FakeHost host;
         logcat_test::installBrokenAdb( host );
         auto* runner = new FakeAdbDevices;
-        DeviceScan scan( runner );
+        DeviceScan scan( &host.settings(), runner );
         runner->listOne( "emulator-5554" );
         const ScanLog log( scan );
 
@@ -614,7 +612,7 @@ SCENARIO( "the QProcess adapter runs adb devices -l", "[devicescan]" )
         {
             QElapsedTimer timer;
             timer.start();
-            const DeviceScan scan;
+            const DeviceScan scan( &host.settings() );
             const auto constructionMs = timer.elapsed();
             REQUIRE( waitFor( [ &scan ]() { return !scan.isScanning(); } ) );
 
@@ -636,7 +634,7 @@ SCENARIO( "the QProcess adapter runs adb devices -l", "[devicescan]" )
 
         WHEN( "the scan has run it" )
         {
-            const DeviceScan scan;
+            const DeviceScan scan( &host.settings() );
             REQUIRE( waitFor( [ &scan ]() { return !scan.isScanning(); } ) );
 
             THEN( "adb's message is logged" )
@@ -657,7 +655,7 @@ SCENARIO( "the QProcess adapter runs adb devices -l", "[devicescan]" )
             QElapsedTimer timer;
             timer.start();
             {
-                const DeviceScan scan;
+                const DeviceScan scan( &host.settings() );
                 logcat_test::processEventsFor( 200 );
                 REQUIRE( scan.isScanning() );
             }
@@ -679,7 +677,7 @@ SCENARIO( "the QProcess adapter runs adb devices -l", "[devicescan]" )
 
         WHEN( "the scan has tried to run it" )
         {
-            const DeviceScan scan;
+            const DeviceScan scan( &host.settings() );
             REQUIRE( waitFor( [ &scan ]() { return !scan.isScanning(); } ) );
 
             THEN( "the failure is logged" )
@@ -692,7 +690,7 @@ SCENARIO( "the QProcess adapter runs adb devices -l", "[devicescan]" )
         {
             const MessageCapture capture;
             {
-                const DeviceScan scan;
+                const DeviceScan scan( &host.settings() );
             }
 
             THEN( "no running process is left to Qt to destroy" )

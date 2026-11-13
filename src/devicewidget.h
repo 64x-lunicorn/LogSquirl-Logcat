@@ -53,6 +53,7 @@ namespace logcat {
 
 class DeviceScan;
 class Sessions;
+class Settings;
 
 /**
  * Non-modal dialog for managing ADB logcat sessions.
@@ -65,17 +66,21 @@ class DeviceWidget : public QDialog {
 
 public:
     /**
+     * @param settings  The ADB path the dialog shows and sets.  Must
+     *                  outlive the dialog.
      * @param scan      The devices the dialog shows.  Must outlive the
      *                  dialog.
      * @param sessions  The sessions the dialog shows.  Must outlive the
      *                  dialog.
      * @param parent    QWidget parent.
      */
-    DeviceWidget( DeviceScan* scan, Sessions* sessions, QWidget* parent = nullptr );
+    DeviceWidget( Settings* settings, DeviceScan* scan, Sessions* sessions,
+                  QWidget* parent = nullptr );
 
     /**
      * Ask for the ADB executable path (Configure button, and Plugins →
-     * Configure), save it, and rescan the devices with it.
+     * Configure) and save it in the settings, which has the devices
+     * rescanned with it (Settings::adbPathChanged()).
      *
      * @param parent  Parent of the input dialog.
      */
@@ -107,6 +112,7 @@ private:
     /** Return the serial of the currently selected device, or empty string. */
     QString currentSerial() const;
 
+    Settings* settings_ = nullptr;
     DeviceScan* scan_ = nullptr;
     Sessions* sessions_ = nullptr;
 

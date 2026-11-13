@@ -28,9 +28,9 @@
  *   └────────────────────────────────────────────────┘
  *
  * Opened by the tab's Settings… button (sidebarwidget.h).  OK saves the log
- * directory in the device store (devicestore.h) and the ADB path in
- * logcat.ini (adbprocess.h), and rescans the devices with a new ADB path
- * right away.  A device's own save path is set on its tile instead.
+ * directory and the ADB path in the settings (settings.h); a new ADB path
+ * has the devices rescanned right away (Settings::adbPathChanged()).  A
+ * device's own save path is set on its tile instead.
  *
  * Children named for tests: "logDir", "adbPath" (line edits), and their
  * browse buttons "browseLogDir", "browseAdb".
@@ -44,23 +44,20 @@ class QLineEdit;
 
 namespace logcat {
 
-class DeviceScan;
-class DeviceStore;
+class Settings;
 
 class SettingsDialog : public QDialog {
     Q_OBJECT
 
 public:
-    /// Shows the settings of @p store and of adb; @p scan rescans with a
-    /// new ADB path.  Both must outlive it.
-    SettingsDialog( DeviceStore* store, DeviceScan* scan, QWidget* parent = nullptr );
+    /// Shows @p settings, which must outlive it.
+    explicit SettingsDialog( Settings* settings, QWidget* parent = nullptr );
 
-    /// Save the settings, rescan with a new ADB path, and close.
+    /// Save the settings and close.
     void accept() override;
 
 private:
-    DeviceStore* store_;
-    DeviceScan* scan_;
+    Settings* settings_;
     QLineEdit* logDir_;
     QLineEdit* adbPath_;
 };

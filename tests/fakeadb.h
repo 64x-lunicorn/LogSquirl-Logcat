@@ -22,24 +22,24 @@
  * @brief Stand-ins for the adb executable, for tests.
  *
  * The install helpers write a file into the FakeHost's config directory
- * and point the logcat.ini "adb/path" override at it, so findAdb()
- * returns it instead of a real adb.
+ * and set it as the ADB path in the host's settings, so findAdb() returns
+ * it instead of a real adb.
  */
 
 #pragma once
 
 #include "fakehost.h"
+#include "settings.h"
 
 #include <QFile>
-#include <QSettings>
 
 namespace logcat_test {
 
-/** Make @p path the adb that the plugin under test runs. */
+/** Make @p path the adb that the plugin under test runs: a scan over the
+ *  host's settings starts again with it. */
 inline void useAdb( const FakeHost& host, const QString& path )
 {
-    QSettings settings( host.configDir() + "/logcat.ini", QSettings::IniFormat );
-    settings.setValue( "adb/path", path );
+    host.settings().setAdbPathOverride( path );
 }
 
 /**

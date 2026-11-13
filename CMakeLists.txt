@@ -48,6 +48,7 @@ add_library(logsquirl_logcat SHARED
     src/devicestore.cpp
     src/devicetile.cpp
     src/settingsdialog.cpp
+    src/settings.cpp
 )
 
 # Qt MOC needs to know about our Q_OBJECT classes

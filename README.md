@@ -323,7 +323,7 @@ logsquirl-logcat/
 ├── src/
 │   ├── plugin.h                # Global state shared across translation units
 │   ├── plugin.cpp              # C ABI entry points (get_info, init, shutdown)
-│   ├── adbprocess.h            # ADB discovery + per-device QProcess wrapper
+│   ├── adbprocess.h            # Per-device logcat QProcess wrapper, device list parsing
 │   ├── adbprocess.cpp
 │   ├── devicescan.h            # Device scan (adb devices -l) behind a port, QProcess adapter
 │   ├── devicescan.cpp
@@ -340,8 +340,10 @@ logsquirl-logcat/
 │   ├── tilestate.h             # A tile's state, shared by the roster and the tile
 │   ├── devicetile.h            # A device's tile (card): state, Start/Stop, Forget
 │   ├── devicetile.cpp
-│   ├── devicestore.h           # Devices seen before, save paths, log directory
+│   ├── devicestore.h           # Devices seen before, their save paths
 │   ├── devicestore.cpp
+│   ├── settings.h              # logcat.ini: finding adb, the ADB path, the log directory
+│   ├── settings.cpp
 │   ├── settingsdialog.h        # The tab's settings: log directory, ADB path
 │   └── settingsdialog.cpp
 ├── tests/
@@ -352,6 +354,7 @@ logsquirl-logcat/
 │   ├── presets_test.cpp        # The shipped filter group and highlighter set
 │   ├── devicetile_test.cpp     # The tile on its own
 │   ├── devicestore_test.cpp    # Remembering devices, where logs go
+│   ├── settings_test.cpp       # Finding adb, the ADB path, the log directory, on a temp ini
 │   ├── deviceroster_test.cpp   # Table tests: what each tile shows
 │   ├── devicescan_test.cpp     # The device scan, its runs completed by the test
 │   ├── fakeadbdevices.h        # The scan's test adapter: a test ends each run

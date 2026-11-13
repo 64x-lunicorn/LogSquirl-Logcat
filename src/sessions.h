@@ -62,11 +62,14 @@
 
 namespace logcat {
 
+class Settings;
+
 class Sessions : public QObject {
     Q_OBJECT
 
 public:
-    explicit Sessions( QObject* parent = nullptr );
+    /// Sessions that run the adb of @p settings, which must outlive them.
+    explicit Sessions( const Settings* settings, QObject* parent = nullptr );
 
     /// Sessions that still run are ended without signals and without
     /// keeping their temporary files: call stopAll() first.
@@ -150,6 +153,8 @@ private:
 
     /** Whether a running session writes to the file at @p path. */
     bool isFileInUse( const QString& path ) const;
+
+    const Settings* settings_; ///< Finds the adb a session runs.
 
     // ── Running sessions (serial → AdbProcess*) ─────────────────────
     QMap<QString, AdbProcess*> sessions_;

@@ -23,7 +23,8 @@
  *
  * A FakeHost installs itself into g_state for its lifetime: the plugin
  * gets a private, empty config directory (so tests never read or write
- * a real logcat.ini) and a private temporary root, and every log message,
+ * a real logcat.ini, and settings() over it) and a private temporary root,
+ * and every log message,
  * notification, open_file() request and menu entry is recorded for the
  * test to inspect.
  */
@@ -31,6 +32,7 @@
 #pragma once
 
 #include "plugin.h"
+#include "settings.h"
 
 #include <catch2/catch.hpp>
 
@@ -62,7 +64,8 @@ public:
     };
 
     FakeHost()
-        : configDirUtf8_( configDir_.path().toUtf8() )
+        : settings_( configDir_.path() )
+        , configDirUtf8_( configDir_.path().toUtf8() )
     {
         api_.api_version = LOGSQUIRL_PLUGIN_API_VERSION;
         api_.log_message = []( void* handle, int, const char* message ) {
@@ -123,6 +126,14 @@ public:
         return configDir_.path();
     }
 
+    /** The settings in the plugin's config directory, for the modules under
+     *  test (the plugin's own, after init(), are another object on the same
+     *  file). */
+    logcat::Settings& settings() const
+    {
+        return settings_;
+    }
+
     /** The plugin's temporary root, private to this host. */
     QString tempRoot() const
     {
@@ -146,6 +157,8 @@ private:
     }
 
     QTemporaryDir configDir_;
+    /// Mutable: the helpers that set the adb take a const host.
+    mutable logcat::Settings settings_;
     QTemporaryDir tempRoot_;
     QByteArray configDirUtf8_;
     LogSquirlHostApi api_{};

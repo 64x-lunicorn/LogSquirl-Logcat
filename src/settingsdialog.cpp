@@ -24,10 +24,8 @@
 
 #include "settingsdialog.h"
 
-#include "adbprocess.h"
-#include "devicescan.h"
-#include "devicestore.h"
 #include "plugin.h"
+#include "settings.h"
 
 #include <QDialogButtonBox>
 #include <QFileDialog>
@@ -54,10 +52,9 @@ QHBoxLayout* withBrowse( QLineEdit* edit, QPushButton* browse, const char* brows
 
 } // namespace
 
-SettingsDialog::SettingsDialog( DeviceStore* store, DeviceScan* scan, QWidget* parent )
+SettingsDialog::SettingsDialog( Settings* settings, QWidget* parent )
     : QDialog( parent )
-    , store_( store )
-    , scan_( scan )
+    , settings_( settings )
     , logDir_( new QLineEdit( this ) )
     , adbPath_( new QLineEdit( this ) )
 {
@@ -65,7 +62,7 @@ SettingsDialog::SettingsDialog( DeviceStore* store, DeviceScan* scan, QWidget* p
     setMinimumWidth( 460 );
 
     logDir_->setObjectName( "logDir" );
-    logDir_->setText( store_->logDir() );
+    logDir_->setText( settings_->customLogDir() );
     logDir_->setPlaceholderText( QStringLiteral( "(logs/ in the plugin's settings directory)" ) );
     logDir_->setToolTip( QStringLiteral( "Where a device without a save path of its own writes "
                                          "a new file at each Start:\n"
@@ -74,9 +71,9 @@ SettingsDialog::SettingsDialog( DeviceStore* store, DeviceScan* scan, QWidget* p
     browseLogDir->setToolTip( QStringLiteral( "Browse for the log directory" ) );
 
     adbPath_->setObjectName( "adbPath" );
-    adbPath_->setText( AdbProcess::adbPathOverride() );
+    adbPath_->setText( settings_->adbPathOverride() );
     // What an empty field uses (with an override, findAdb() would name that)
-    const auto detected = adbPath_->text().isEmpty() ? AdbProcess::findAdb() : QString();
+    const auto detected = adbPath_->text().isEmpty() ? settings_->findAdb() : QString();
     adbPath_->setPlaceholderText(
         detected.isEmpty() ? QStringLiteral( "(found automatically)" )
                            : QStringLiteral( "(found automatically: %1)" ).arg( detected ) );
@@ -124,22 +121,9 @@ SettingsDialog::SettingsDialog( DeviceStore* store, DeviceScan* scan, QWidget* p
 
 void SettingsDialog::accept()
 {
-    store_->setLogDir( logDir_->text().trimmed() );
-
-    const auto adbPath = adbPath_->text().trimmed();
-    if ( adbPath != AdbProcess::adbPathOverride() ) {
-        if ( AdbProcess::setAdbPathOverride( adbPath ) ) {
-            hostLog( LOGSQUIRL_LOG_INFO, adbPath.isEmpty()
-                                             ? "ADB path override cleared — using auto-detection."
-                                             : "ADB path set to: " + adbPath );
-            scan_->restart();
-        }
-        else {
-            hostLog( LOGSQUIRL_LOG_WARNING,
-                     "The ADB path cannot be configured: no config directory." );
-        }
-    }
-
+    settings_->setLogDir( logDir_->text() );
+    // A new path has the devices rescanned (Settings::adbPathChanged()).
+    settings_->setAdbPathOverride( adbPath_->text() );
     QDialog::accept();
 }
 

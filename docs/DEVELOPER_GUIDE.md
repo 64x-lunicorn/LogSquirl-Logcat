@@ -322,6 +322,7 @@ classDiagram
     class PluginState {
         +LogSquirlHostApi* api
         +void* handle
+        +Settings* settings
         +DeviceScan* scan
         +Sessions* sessions
         +DeviceStore* store
@@ -405,9 +406,17 @@ classDiagram
         +remember(attached)
         +forget(serial)
         +setSavePath(serial, path)
-        +logDir() QString
-        +savePathFor(serial) QString
+        +savePathFor(serial, logDir) QString
         changed()
+    }
+
+    class Settings {
+        +findAdb() QString
+        +adbPathOverride() QString
+        +setAdbPathOverride(path) bool
+        +logDir() QString
+        +setLogDir(dir)
+        adbPathChanged()
     }
 
     class SettingsDialog {
@@ -417,6 +426,7 @@ classDiagram
     }
 
     class AdbProcess {
+        -QString adb_
         -QString serial_
         -QProcess process_
         -LogFile logFile_
@@ -430,7 +440,6 @@ classDiagram
         +counters() SessionCounters
         +parseDevices(QByteArray)$ QList~Device~
         +parseDeviceList(QByteArray)$ QStringList
-        +findAdb()$ QString
     }
 
     class LogFile {
@@ -444,11 +453,16 @@ classDiagram
         +generateLogPath(QString, QString)$ QString
     }
 
+    PluginState --> Settings : settings
     PluginState --> DeviceScan : scan
     PluginState --> Sessions : sessions
     PluginState --> DeviceStore : store
     PluginState --> DeviceWidget : dialog
     PluginState --> SidebarWidget : sidebarWidget
+    DeviceScan --> Settings : findAdb(), restarts on adbPathChanged()
+    Sessions --> Settings : findAdb()
+    SettingsDialog --> Settings : sets
+    DeviceWidget --> Settings : sets the ADB path
     DeviceScan --> AdbDevicesRunner : runs adb devices -l
     AdbDevicesRunner <|-- QProcessAdbDevices
     DeviceWidget --> DeviceScan : view of
@@ -484,7 +498,7 @@ stands for a device, not for a saved configuration:
   tile is greyed out, with **Forget**.
 - **What it does.** **Start** (only while connected) runs logcat into the
   device's own save path or a new file in the log directory
-  (`DeviceStore::savePathFor()`), **Stop** ends it, **↻ Rotate** (while it
+  (`DeviceStore::savePathFor()`, `Settings::logDir()`), **Stop** ends it, **↻ Rotate** (while it
   runs) goes on in a new file and tab, **Save to…** sets the device's own save
   path. **Settings…** in the tab opens `SettingsDialog`: the log directory and
   the ADB path.
@@ -622,8 +636,9 @@ Use lowercase `logsquirl` in paths (matching QStandardPaths resolution):
 ### ADB paths
 
 On Windows, the ADB executable is `adb.exe`.  Use `QStandardPaths` or
-let `QProcess` handle the extension. The plugin checks well-known platform
-paths as a fallback (e.g. `/opt/homebrew/bin/adb` on macOS).
+let `QProcess` handle the extension. `Settings::findAdb()` (`src/settings.h`)
+checks well-known platform paths as a fallback (e.g. `/opt/homebrew/bin/adb`
+on macOS).
 
 ### Temp files
 

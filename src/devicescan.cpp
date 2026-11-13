@@ -24,6 +24,7 @@
 
 #include "devicescan.h"
 #include "plugin.h"
+#include "settings.h"
 
 #include <QProcess>
 #include <QSignalBlocker>
@@ -96,8 +97,9 @@ void QProcessAdbDevices::abandon()
 
 // ── DeviceScan ──────────────────────────────────────────────────────────
 
-DeviceScan::DeviceScan( AdbDevicesRunner* runner, QObject* parent )
+DeviceScan::DeviceScan( const Settings* settings, AdbDevicesRunner* runner, QObject* parent )
     : QObject( parent )
+    , settings_( settings )
     , runner_( runner ? runner : new QProcessAdbDevices )
 {
     runner_->setParent( this );
@@ -120,6 +122,10 @@ DeviceScan::DeviceScan( AdbDevicesRunner* runner, QObject* parent )
         guarded( "ending a device scan that timed out", [ this ] { onTimeout(); } );
     } );
 
+    // A scan with the old adb is stale.
+    connect( settings_, &Settings::adbPathChanged, this,
+             [ this ]() { guarded( "scanning with the new adb", [ this ] { restart(); } ); } );
+
     refresh();
 }
 
@@ -137,7 +143,7 @@ void DeviceScan::refresh()
         return;
     }
 
-    const auto adb = AdbProcess::findAdb();
+    const auto adb = settings_->findAdb();
     if ( adb.isEmpty() ) {
         logFailure( "adb not found — cannot discover devices." );
         setDevices( {} );

@@ -37,6 +37,7 @@
 #include "devicetile.h"
 #include "plugin.h"
 #include "sessions.h"
+#include "settings.h"
 #include "settingsdialog.h"
 
 #include <QDateTime>
@@ -55,9 +56,10 @@ namespace logcat {
 
 // ── Construction ────────────────────────────────────────────────────────
 
-SidebarWidget::SidebarWidget( DeviceStore* store, DeviceScan* scan, Sessions* sessions,
-                              QWidget* parent )
+SidebarWidget::SidebarWidget( Settings* pluginSettings, DeviceStore* store, DeviceScan* scan,
+                              Sessions* sessions, QWidget* parent )
     : QWidget( parent )
+    , settings_( pluginSettings )
     , store_( store )
     , scan_( scan )
     , sessions_( sessions )
@@ -263,7 +265,7 @@ void SidebarWidget::start( const QString& serial )
     if ( !scan_->devices().contains( serial ) ) {
         return;
     }
-    sessions_->startSession( serial, store_->savePathFor( serial ) );
+    sessions_->startSession( serial, store_->savePathFor( serial, settings_->logDir() ) );
 }
 
 void SidebarWidget::editSavePath( const QString& serial )
@@ -327,7 +329,7 @@ void SidebarWidget::editSavePath( const QString& serial )
 
 void SidebarWidget::openSettings()
 {
-    auto* dialog = new SettingsDialog( store_, scan_, this );
+    auto* dialog = new SettingsDialog( settings_, this );
     dialog->setAttribute( Qt::WA_DeleteOnClose );
     dialog->open();
 }

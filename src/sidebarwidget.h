@@ -91,6 +91,7 @@ class DeviceScan;
 class DeviceStore;
 class DeviceTile;
 class Sessions;
+class Settings;
 
 class SidebarWidget : public QWidget {
     Q_OBJECT
@@ -102,9 +103,9 @@ public:
     /// How often a running tile's counters are polled, in milliseconds.
     static constexpr int kCounterPollMs = 1000;
 
-    /// Shows the devices of @p store and @p scan, and the sessions of
-    /// @p sessions, which must all outlive it.
-    SidebarWidget( DeviceStore* store, DeviceScan* scan, Sessions* sessions,
+    /// Shows the devices of @p store and @p scan, the sessions of
+    /// @p sessions, and @p settings (Settings…), which must all outlive it.
+    SidebarWidget( Settings* settings, DeviceStore* store, DeviceScan* scan, Sessions* sessions,
                    QWidget* parent = nullptr );
 
     /// Show the devices and sessions as they are now.
@@ -146,6 +147,7 @@ private:
     /// The tile of @p serial, created (and connected) if it has none.
     DeviceTile* tileFor( const QString& serial );
 
+    Settings* settings_;
     DeviceStore* store_;
     DeviceScan* scan_;
     Sessions* sessions_;

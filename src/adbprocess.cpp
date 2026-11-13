@@ -23,10 +23,8 @@
  *
  * HOW IT WORKS
  * ────────────
- *   1. findAdb() locates the `adb` executable by checking:
- *      - User config override (logcat.ini)
- *      - ANDROID_HOME / ANDROID_SDK_ROOT environment variables
- *      - System PATH
+ *   1. The owner gives it the `adb` executable, which Settings::findAdb()
+ *      found (settings.h).
  *
  *   2. Sessions (sessions.h) runs `adb devices` in the background, and
  *      parseDevices() reads every device of its tabular output (`adb
@@ -47,11 +45,6 @@
 #include "plugin.h"
 
 #include <QDeadlineTimer>
-#include <QDir>
-#include <QFileInfo>
-#include <QProcessEnvironment>
-#include <QSettings>
-#include <QStandardPaths>
 
 #include <algorithm>
 
@@ -77,8 +70,10 @@ QString messageText( const QString& text )
 
 // ── Construction / destruction ──────────────────────────────────────────
 
-AdbProcess::AdbProcess( const QString& serial, const QString& savePath, QObject* parent )
+AdbProcess::AdbProcess( const QString& adb, const QString& serial, const QString& savePath,
+                        QObject* parent )
     : QObject( parent )
+    , adb_( adb )
     , serial_( serial )
     , process_( new QProcess( this ) )
     , logFile_( serial, savePath )
@@ -124,106 +119,7 @@ AdbProcess::~AdbProcess()
     }
 }
 
-// ── Static: ADB discovery ───────────────────────────────────────────────
-
-QString AdbProcess::configDir()
-{
-    if ( g_state.api && g_state.handle ) {
-        return QString::fromUtf8( g_state.api->get_config_dir( g_state.handle ) );
-    }
-    // No fallback: one in the temporary directory, /tmp on Linux, would
-    // let any local user set the adb that LogSquirl runs.
-    return {};
-}
-
-QString AdbProcess::settingsFile()
-{
-    const auto cfgDir = configDir();
-    return cfgDir.isEmpty() ? QString() : cfgDir + "/logcat.ini";
-}
-
-QString AdbProcess::adbPathOverride()
-{
-    const auto file = settingsFile();
-    if ( file.isEmpty() ) {
-        return {};
-    }
-    const QSettings settings( file, QSettings::IniFormat );
-    return settings.value( "adb/path" ).toString();
-}
-
-bool AdbProcess::setAdbPathOverride( const QString& path )
-{
-    const auto file = settingsFile();
-    if ( file.isEmpty() ) {
-        return false;
-    }
-    QSettings settings( file, QSettings::IniFormat );
-    settings.setValue( "adb/path", path );
-    return true;
-}
-
-QString AdbProcess::findAdb()
-{
-    // 1. Check user override from plugin config
-    if ( const auto override = adbPathOverride();
-         !override.isEmpty() && QFileInfo::exists( override ) ) {
-        return override;
-    }
-
-    const auto env = QProcessEnvironment::systemEnvironment();
-
-    // The SDK's adb, as an executable is named on this platform: adb.exe
-    // on Windows.
-    const auto sdkAdb = []( const QString& sdk ) {
-        return sdk.isEmpty() ? QString()
-                             : QStandardPaths::findExecutable(
-                                   "adb", { QDir( sdk ).filePath( "platform-tools" ) } );
-    };
-
-    // 2. Check ANDROID_HOME/platform-tools/adb
-    const auto androidHome = env.value( "ANDROID_HOME" );
-    if ( const auto candidate = sdkAdb( androidHome ); !candidate.isEmpty() ) {
-        return candidate;
-    }
-
-    // 3. Check ANDROID_SDK_ROOT/platform-tools/adb (legacy)
-    const auto sdkRoot = env.value( "ANDROID_SDK_ROOT" );
-    if ( sdkRoot != androidHome ) {
-        if ( const auto candidate = sdkAdb( sdkRoot ); !candidate.isEmpty() ) {
-            return candidate;
-        }
-    }
-
-    // 4. Fall back to system PATH
-    const auto pathAdb = QStandardPaths::findExecutable( "adb" );
-    if ( !pathAdb.isEmpty() ) {
-        return pathAdb;
-    }
-
-    // 5. Check well-known platform-specific locations.
-    //    On macOS, GUI apps launched from Finder/Dock have a minimal PATH
-    //    that may not include Homebrew or user-installed SDK paths.
-    const QStringList wellKnownPaths = {
-#ifdef Q_OS_MACOS
-        "/opt/homebrew/bin/adb",
-        "/usr/local/bin/adb",
-        QDir::homePath() + "/Library/Android/sdk/platform-tools/adb",
-#endif
-#ifdef Q_OS_LINUX
-        "/usr/bin/adb",
-        "/usr/local/bin/adb",
-        QDir::homePath() + "/Android/Sdk/platform-tools/adb",
-#endif
-    };
-    for ( const auto& candidate : wellKnownPaths ) {
-        if ( QFileInfo::exists( candidate ) ) {
-            return candidate;
-        }
-    }
-
-    return {};
-}
+// ── Static: parsing ─────────────────────────────────────────────────────
 
 QStringList AdbProcess::parseDeviceList( const QByteArray& output )
 {
@@ -317,8 +213,7 @@ bool AdbProcess::start()
         return false;
     }
 
-    const auto adb = findAdb();
-    if ( adb.isEmpty() ) {
+    if ( adb_.isEmpty() ) {
         Q_EMIT errorOccurred( "ADB executable not found.\n\n"
                               "Set the path via Plugins → Configure, or ensure "
                               "ANDROID_HOME is set." );
@@ -338,7 +233,7 @@ bool AdbProcess::start()
     stderrBuffer_.clear();
     lastStderrLine_.clear();
 
-    process_->setProgram( adb );
+    process_->setProgram( adb_ );
     process_->setArguments( { "-s", serial_, "logcat" } );
     counters_.startTime = QDateTime::currentDateTime();
     process_->start();

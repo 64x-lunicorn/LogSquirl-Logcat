@@ -32,6 +32,7 @@ add_executable(logsquirl_logcat_tests
     generatelogpath_test.cpp
     plugin_test.cpp
     presets_test.cpp
+    settings_test.cpp
 )
 
 set_target_properties(logsquirl_logcat_tests PROPERTIES
@@ -70,6 +71,7 @@ target_sources(logsquirl_logcat_tests
         "${CMAKE_SOURCE_DIR}/src/devicestore.cpp"
         "${CMAKE_SOURCE_DIR}/src/devicetile.cpp"
         "${CMAKE_SOURCE_DIR}/src/settingsdialog.cpp"
+        "${CMAKE_SOURCE_DIR}/src/settings.cpp"
 )
 
 # Where presets_test.cpp finds the files the plugin ships.

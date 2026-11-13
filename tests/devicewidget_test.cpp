@@ -106,9 +106,9 @@ SCENARIO( "the dialog's Refresh button shows a running device scan", "[devicewid
         FakeHost host;
         logcat_test::installBrokenAdb( host ); // only its path is used
         auto* runner = new FakeAdbDevices;
-        DeviceScan scan( runner );
-        Sessions sessions;
-        const DeviceWidget widget( &scan, &sessions );
+        DeviceScan scan( &host.settings(), runner );
+        Sessions sessions( &host.settings() );
+        const DeviceWidget widget( &host.settings(), &scan, &sessions );
         auto* refresh = widget.findChild<QPushButton*>( "refresh" );
         REQUIRE( refresh != nullptr );
 
@@ -125,22 +125,21 @@ SCENARIO( "the dialog's Refresh button shows a running device scan", "[devicewid
         FakeHost host;
         logcat_test::installBrokenAdb( host );
         auto* runner = new FakeAdbDevices;
-        DeviceScan scan( runner );
-        Sessions sessions;
-        const DeviceWidget widget( &scan, &sessions );
+        DeviceScan scan( &host.settings(), runner );
+        Sessions sessions( &host.settings() );
+        const DeviceWidget widget( &host.settings(), &scan, &sessions );
 
-        WHEN( "the ADB path changes to one where no adb can be found" )
+        WHEN( "the ADB path changes to one where no adb can be found, which restarts the scan" )
         {
             const NoAdbAnywhere noAdb;
-            logcat_test::useAdb( host, host.configDir() + "/missing-adb" );
-            if ( !logcat::AdbProcess::findAdb().isEmpty() ) {
-                WARN( "An adb is installed in a well-known location; skipped." );
-                return;
-            }
             auto* refresh = widget.findChild<QPushButton*>( "refresh" );
             REQUIRE( refresh != nullptr );
             REQUIRE_FALSE( refresh->isEnabled() );
-            scan.restart();
+            logcat_test::useAdb( host, host.configDir() + "/missing-adb" );
+            if ( !host.settings().findAdb().isEmpty() ) {
+                WARN( "An adb is installed in a well-known location; skipped." );
+                return;
+            }
 
             THEN( "the Refresh button is usable again" )
             {
@@ -169,9 +168,9 @@ SCENARIO( "an adb path is shown as plain text", "[devicewidget]" )
 
         WHEN( "the dialog shows it" )
         {
-            DeviceScan scan( new FakeAdbDevices );
-            Sessions sessions;
-            const DeviceWidget widget( &scan, &sessions );
+            DeviceScan scan( &host.settings(), new FakeAdbDevices );
+            Sessions sessions( &host.settings() );
+            const DeviceWidget widget( &host.settings(), &scan, &sessions );
 
             THEN( "it is shown as its literal text" )
             {

@@ -26,7 +26,8 @@
  * more scan after it; restart() abandons a running scan, whose result is
  * stale; a scan that hangs is given up after 10 s; the same failure is
  * logged once; scanningChanged() says when a scan begins and when the last
- * one ends.
+ * one ends.  It runs the adb that Settings finds (settings.h), and starts
+ * again when the ADB path is set.
  *
  * It runs adb through a port, AdbDevicesRunner.  The plugin's adapter,
  * QProcessAdbDevices, starts a QProcess; the tests' adapter completes a
@@ -54,6 +55,8 @@ class QProcess;
 class QTimer;
 
 namespace logcat {
+
+class Settings;
 
 /**
  * The port through which DeviceScan runs `adb devices -l`.
@@ -110,9 +113,12 @@ public:
     /// How long a scan may take before it is given up.
     static constexpr int kTimeoutMs = 10000;
 
-    /// Scans with @p runner (which becomes its child), and with a
-    /// QProcessAdbDevices if it is null.  Starts the first scan.
-    explicit DeviceScan( AdbDevicesRunner* runner = nullptr, QObject* parent = nullptr );
+    /// Scans with the adb of @p settings, which must outlive it, and with
+    /// @p runner (which becomes its child), or a QProcessAdbDevices if it is
+    /// null.  Starts the first scan, and restart()s when the ADB path of
+    /// @p settings changes.
+    explicit DeviceScan( const Settings* settings, AdbDevicesRunner* runner = nullptr,
+                         QObject* parent = nullptr );
 
     /// Abandons a scan that still runs.
     ~DeviceScan() override;
@@ -151,7 +157,8 @@ public Q_SLOTS:
 
     /**
      * Abandon a running scan and start a new one, e.g. because the ADB
-     * path has changed and the running scan's result would be stale.
+     * path has changed (Settings::adbPathChanged()) and the running scan's
+     * result would be stale.
      */
     void restart();
 
@@ -182,6 +189,7 @@ private:
     /** A scan has ended: run the rescan requested during it, if any. */
     void onScanEnded();
 
+    const Settings* settings_;           ///< Finds the adb to run.
     AdbDevicesRunner* runner_ = nullptr; ///< Runs `adb devices -l`.
     QTimer* timeout_ = nullptr;          ///< Gives up on a hanging scan.
     QList<Device> attached_;             ///< Result of the last scan.

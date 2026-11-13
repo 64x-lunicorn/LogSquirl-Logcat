@@ -28,10 +28,10 @@
  */
 
 #include "devicewidget.h"
-#include "adbprocess.h"
 #include "devicescan.h"
 #include "plugin.h"
 #include "sessions.h"
+#include "settings.h"
 
 #include <QFileDialog>
 #include <QGroupBox>
@@ -43,8 +43,10 @@ namespace logcat {
 
 // ── Construction ────────────────────────────────────────────────────────
 
-DeviceWidget::DeviceWidget( DeviceScan* scan, Sessions* sessions, QWidget* parent )
+DeviceWidget::DeviceWidget( Settings* settings, DeviceScan* scan, Sessions* sessions,
+                            QWidget* parent )
     : QDialog( parent )
+    , settings_( settings )
     , scan_( scan )
     , sessions_( sessions )
 {
@@ -287,18 +289,18 @@ void DeviceWidget::updateUiState()
     }
 
     // Show the current ADB path
-    const auto adbPath = AdbProcess::findAdb();
+    const auto adbPath = settings_->findAdb();
     adbPathLabel_->setText( adbPath.isEmpty() ? "(not found)" : adbPath );
 }
 
 void DeviceWidget::configureAdbPath( QWidget* parent )
 {
-    if ( AdbProcess::configDir().isEmpty() ) {
+    if ( settings_->settingsFile().isEmpty() ) {
         hostLog( LOGSQUIRL_LOG_WARNING, "The ADB path cannot be configured: no config directory." );
         return;
     }
-    const auto currentPath = AdbProcess::adbPathOverride();
-    const auto detected = AdbProcess::findAdb();
+    const auto currentPath = settings_->adbPathOverride();
+    const auto detected = settings_->findAdb();
 
     const auto prompt = QString( "ADB executable path:\n\n"
                                  "Detected: %1\nCurrent override: %2\n\n"
@@ -311,11 +313,8 @@ void DeviceWidget::configureAdbPath( QWidget* parent )
                                                 QLineEdit::Normal, currentPath, &ok );
 
     if ( ok ) {
-        AdbProcess::setAdbPathOverride( newPath );
-        hostLog( LOGSQUIRL_LOG_INFO, newPath.isEmpty()
-                                         ? "ADB path override cleared — using auto-detection."
-                                         : "ADB path set to: " + newPath );
-        scan_->restart();
+        // A new path has the devices rescanned (Settings::adbPathChanged()).
+        settings_->setAdbPathOverride( newPath );
     }
 }
 

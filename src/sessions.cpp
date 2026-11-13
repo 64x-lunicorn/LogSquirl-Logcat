@@ -40,6 +40,7 @@
 
 #include "sessions.h"
 #include "plugin.h"
+#include "settings.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -84,8 +85,9 @@ void openFollowed( const QString& path )
 
 // ── Construction ────────────────────────────────────────────────────────
 
-Sessions::Sessions( QObject* parent )
+Sessions::Sessions( const Settings* settings, QObject* parent )
     : QObject( parent )
+    , settings_( settings )
 {
 }
 
@@ -107,7 +109,7 @@ bool Sessions::startSession( const QString& serial, const QString& savePath )
         return false;
     }
 
-    auto* proc = new AdbProcess( serial, savePath, this );
+    auto* proc = new AdbProcess( settings_->findAdb(), serial, savePath, this );
 
     connect( proc, &AdbProcess::finished, this, [ this, serial ]( int ) {
         guarded( "ending a logcat session", [ this, &serial ] { onSessionFinished( serial ); } );

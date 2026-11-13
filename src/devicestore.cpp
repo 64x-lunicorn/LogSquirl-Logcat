@@ -26,7 +26,6 @@
 #include "logfile.h"
 
 #include <QDir>
-#include <QFileInfo>
 #include <QSettings>
 
 #include <algorithm>
@@ -36,7 +35,6 @@ namespace logcat {
 namespace {
 
 constexpr auto kDevices = "devices";
-constexpr auto kLogDir = "logcat/logDir";
 
 } // namespace
 
@@ -131,37 +129,15 @@ void DeviceStore::setSavePath( const QString& serial, const QString& path )
     }
 }
 
-QString DeviceStore::logDir() const
-{
-    if ( settingsFile_.isEmpty() ) {
-        return {};
-    }
-    const QSettings settings( settingsFile_, QSettings::IniFormat );
-    return settings.value( kLogDir ).toString();
-}
-
-void DeviceStore::setLogDir( const QString& dir )
-{
-    if ( settingsFile_.isEmpty() ) {
-        return;
-    }
-    QSettings settings( settingsFile_, QSettings::IniFormat );
-    settings.setValue( kLogDir, dir.trimmed() );
-}
-
-QString DeviceStore::savePathFor( const QString& serial ) const
+QString DeviceStore::savePathFor( const QString& serial, const QString& logDir ) const
 {
     if ( const auto known = find( serial ); known && !known->savePath.isEmpty() ) {
         return known->savePath;
     }
 
-    auto dir = logDir().trimmed();
+    auto dir = logDir.trimmed();
     if ( dir.isEmpty() ) {
-        // Default to logs/ beside the settings, so that captures are kept.
-        if ( settingsFile_.isEmpty() ) {
-            return {};
-        }
-        dir = QFileInfo( settingsFile_ ).absolutePath() + "/logs";
+        return {};
     }
 
     // Ensure the directory exists.  A relative one is left as it is:

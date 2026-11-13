@@ -152,53 +152,47 @@ SCENARIO( "the store remembers the devices it is shown", "[devicestore]" )
 
 SCENARIO( "the store says where a device's log goes", "[devicestore]" )
 {
-    GIVEN( "a store that knows a device" )
+    GIVEN( "a store that knows a device, and a log directory" )
     {
         QTemporaryDir dir;
         const auto file = dir.filePath( "logcat.ini" );
         DeviceStore store( file );
         store.remember( { { "emulator-5554", "device", {} } } );
+        const auto logDir = dir.filePath( "logs" );
 
-        THEN( "without a log directory, a new file goes to logs/ beside the settings" )
+        THEN( "a new file goes to the log directory, which is created" )
         {
-            const auto path = store.savePathFor( "emulator-5554" );
-            REQUIRE( QFileInfo( path ).absolutePath() == QDir( dir.path() ).filePath( "logs" ) );
+            const auto path = store.savePathFor( "emulator-5554", logDir );
+            REQUIRE( QFileInfo( path ).absolutePath() == logDir );
             REQUIRE( QFileInfo( path ).fileName().endsWith( "_emulator-5554.log" ) );
-            REQUIRE( QFileInfo( QFileInfo( path ).absolutePath() ).isDir() );
+            REQUIRE( QFileInfo( logDir ).isDir() );
         }
 
-        WHEN( "a log directory is set" )
+        THEN( "without a log directory, it is a temporary file" )
         {
-            const auto logDir = dir.filePath( "mine" );
-            store.setLogDir( logDir );
+            REQUIRE( store.savePathFor( "emulator-5554", {} ).isEmpty() );
+        }
 
-            THEN( "a new file goes there, and the directory is remembered" )
+        WHEN( "the device has a save path of its own" )
+        {
+            const auto own = dir.filePath( "phone.log" );
+            store.setSavePath( "emulator-5554", own );
+
+            THEN( "its log goes there, also after a restart" )
             {
-                REQUIRE( QFileInfo( store.savePathFor( "emulator-5554" ) ).absolutePath()
-                         == logDir );
-                REQUIRE( DeviceStore( file ).logDir() == logDir );
+                REQUIRE( store.savePathFor( "emulator-5554", logDir ) == own );
+                REQUIRE( DeviceStore( file ).find( "emulator-5554" )->savePath == own );
             }
 
-            AND_WHEN( "the device has a save path of its own" )
+            AND_WHEN( "the save path is cleared" )
             {
-                const auto own = dir.filePath( "phone.log" );
-                store.setSavePath( "emulator-5554", own );
+                store.setSavePath( "emulator-5554", {} );
 
-                THEN( "its log goes there, also after a restart" )
+                THEN( "its log goes to the log directory again" )
                 {
-                    REQUIRE( store.savePathFor( "emulator-5554" ) == own );
-                    REQUIRE( DeviceStore( file ).find( "emulator-5554" )->savePath == own );
-                }
-
-                AND_WHEN( "the save path is cleared" )
-                {
-                    store.setSavePath( "emulator-5554", {} );
-
-                    THEN( "its log goes to the log directory again" )
-                    {
-                        REQUIRE( QFileInfo( store.savePathFor( "emulator-5554" ) ).absolutePath()
-                                 == logDir );
-                    }
+                    REQUIRE(
+                        QFileInfo( store.savePathFor( "emulator-5554", logDir ) ).absolutePath()
+                        == logDir );
                 }
             }
         }

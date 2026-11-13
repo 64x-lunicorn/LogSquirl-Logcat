@@ -34,7 +34,7 @@
  *
  * USAGE
  * ─────
- *   auto* proc = new AdbProcess( "SERIAL123", "/optional/save.log", parent );
+ *   auto* proc = new AdbProcess( settings.findAdb(), "SERIAL123", "/optional/save.log", parent );
  *   if ( proc->start() )              // launches `adb -s SERIAL123 logcat`
  *       qDebug() << proc->logFilePath(); // LogSquirl opens this file
  *   proc->stop();                     // ends adb, waits for exit
@@ -110,39 +110,20 @@ public:
     /**
      * Construct a logcat session for one device.
      *
+     * @param adb       The adb executable to run (Settings::findAdb()); empty
+     *                  if there is none, which start() reports.
      * @param serial    ADB device serial (from `adb devices`).
      * @param savePath  Optional path to a .log file for persistent saving.
      *                  Pass an empty string to disable saving.
      * @param parent    QObject parent for memory management.
      */
-    explicit AdbProcess( const QString& serial, const QString& savePath = {},
-                         QObject* parent = nullptr );
+    AdbProcess( const QString& adb, const QString& serial, const QString& savePath = {},
+                QObject* parent = nullptr );
 
     /** Stops the process without emitting any signal. */
     ~AdbProcess() override;
 
     // ── Static helpers ───────────────────────────────────────────────
-
-    /**
-     * Auto-detect the ADB executable path.
-     *
-     * Search order:
-     *   1. User override from plugin config (logcat.ini → adb/path)
-     *   2. ANDROID_HOME/platform-tools/adb
-     *   3. ANDROID_SDK_ROOT/platform-tools/adb  (legacy env var)
-     *   4. System PATH lookup
-     *
-     * @return Absolute path to `adb`, or empty string if not found.
-     */
-    static QString findAdb();
-
-    /// The ADB path the user set (logcat.ini → adb/path); empty for
-    /// auto-detection, and without a config directory.
-    static QString adbPathOverride();
-
-    /// Save @p path as the ADB path; empty for auto-detection.  False if
-    /// there is no config directory to save it in.
-    static bool setAdbPathOverride( const QString& path );
 
     /**
      * Parse the raw output of `adb devices` into a list of device serials.
@@ -187,16 +168,6 @@ public:
      */
     static QList<QByteArray>
     takeLines( QByteArray& buffer, qsizetype maxLineBytes = std::numeric_limits<qsizetype>::max() );
-
-    /**
-     * Return the plugin's config directory from the host API.  Empty while
-     * the plugin is not initialised: callers then use no configuration.
-     */
-    static QString configDir();
-
-    /// The plugin's settings file, logcat.ini in configDir() (the ADB path,
-    /// and devicestore.h); empty without a config directory.
-    static QString settingsFile();
 
     /// How long start() waits for adb to launch before giving up.
     static constexpr int kStartTimeoutMs = 5000;
@@ -352,6 +323,7 @@ private:
     /** Write out a buffered partial line, e.g. before the file is closed. */
     void flushPartialLine();
 
+    QString adb_; ///< The adb executable; empty if there is none.
     QString serial_;
 
     /// adb.  A child of this object - unless it outlives it: see ~AdbProcess().
