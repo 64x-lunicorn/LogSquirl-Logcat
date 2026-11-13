@@ -24,8 +24,9 @@
  * The tiles are kept across updates — a rescan every few seconds must not
  * rebuild them under the user's mouse — and only added, removed, reordered
  * and updated as the devices and sessions change.  Session logic is in
- * Sessions, the devices seen before in the DeviceStore; the tab shows them
- * and calls them.
+ * Sessions, the devices seen before in the DeviceStore, what a tile shows
+ * in the device roster; the tab shows the roster's rows and calls the
+ * others.
  */
 
 #include "sidebarwidget.h"
@@ -44,135 +45,12 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
-#include <QLocale>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QTimer>
 #include <QVBoxLayout>
 
-#include <algorithm>
-#include <iterator>
-
 namespace logcat {
-
-namespace {
-
-/// The longest serial a title shows whole.
-constexpr qsizetype kTitleSerialChars = 8;
-
-/// What the tile of a device in @p state is.
-TileState tileState( const QString& state )
-{
-    if ( state == QLatin1String( "device" ) ) {
-        return TileState::Connected;
-    }
-    if ( state == QLatin1String( "unauthorized" ) ) {
-        return TileState::Unauthorized;
-    }
-    if ( state == QLatin1String( "offline" ) ) {
-        return TileState::Offline;
-    }
-    return TileState::Unavailable;
-}
-
-/// The state of a tile in words, for its summary; @p adbState is what adb
-/// says for a device in another state.
-QString stateWords( TileState state, const QString& adbState )
-{
-    switch ( state ) {
-    case TileState::Running:
-        return QStringLiteral( "running" );
-    case TileState::Connected:
-        return QStringLiteral( "connected" );
-    case TileState::Unauthorized:
-        return QStringLiteral( "unauthorized: allow USB debugging on the device" );
-    case TileState::Offline:
-        return QStringLiteral( "offline" );
-    case TileState::Unavailable:
-        return adbState;
-    case TileState::Disconnected:
-        break;
-    }
-    return QStringLiteral( "disconnected" );
-}
-
-} // namespace
-
-QString deviceTitle( const QString& serial, const QString& model )
-{
-    if ( model.isEmpty() ) {
-        return serial;
-    }
-    const auto shown
-        = serial.size() > kTitleSerialChars ? serial.left( 4 ) + QStringLiteral( "…" ) : serial;
-    return QStringLiteral( "%1 · %2" ).arg( model, shown );
-}
-
-QString formatCount( qint64 count )
-{
-    // English, as every other word of the tile.
-    return QLocale( QLocale::English, QLocale::UnitedStates ).toString( count );
-}
-
-QString formatSize( qint64 bytes )
-{
-    constexpr qint64 kUnit = 1024;
-    if ( bytes < kUnit ) {
-        return QStringLiteral( "%1 B" ).arg( bytes );
-    }
-    static const char* const units[] = { "KB", "MB", "GB", "TB" };
-    double value = static_cast<double>( bytes ) / kUnit;
-    std::size_t unit = 0;
-    while ( value >= kUnit && unit + 1 < std::size( units ) ) {
-        value /= kUnit;
-        ++unit;
-    }
-    return QStringLiteral( "%1 %2" ).arg( value, 0, 'f', 1 ).arg( QLatin1String( units[ unit ] ) );
-}
-
-QString formatDuration( qint64 seconds )
-{
-    seconds = std::max<qint64>( seconds, 0 );
-    const auto hours = seconds / 3600;
-    const auto minutes = seconds / 60 % 60;
-    const auto secs = seconds % 60;
-    if ( hours > 0 ) {
-        return QStringLiteral( "%1:%2:%3" )
-            .arg( hours )
-            .arg( minutes, 2, 10, QLatin1Char( '0' ) )
-            .arg( secs, 2, 10, QLatin1Char( '0' ) );
-    }
-    return QStringLiteral( "%1:%2" ).arg( minutes ).arg( secs, 2, 10, QLatin1Char( '0' ) );
-}
-
-qint64 ratePerSecond( qint64 count, qint64 elapsedMs )
-{
-    if ( count <= 0 || elapsedMs <= 0 ) {
-        return 0;
-    }
-    return count * 1000 / elapsedMs;
-}
-
-QStringList sessionDetails( const SessionCounters& counters, qint64 linesPerSecond,
-                            const QDateTime& now )
-{
-    const auto rotations = counters.rotations == 1
-                               ? QStringLiteral( "1 rotation" )
-                               : QStringLiteral( "%1 rotations" ).arg( counters.rotations );
-    const auto next
-        = counters.nextRotationBytes > 0
-              ? QStringLiteral( "rotates at %1" ).arg( formatSize( counters.nextRotationBytes ) )
-              : QStringLiteral( "rotates on request" );
-    return {
-        QStringLiteral( "running %1 · %2 lines/s" )
-            .arg( formatDuration( counters.startTime.secsTo( now ) ),
-                  formatCount( linesPerSecond ) ),
-        QStringLiteral( "%1 lines · %2" )
-            .arg( formatCount( counters.lines ), formatSize( counters.bytes ) ),
-        QStringLiteral( "file %1 · %2" ).arg( formatSize( counters.fileBytes ), rotations ),
-        next,
-    };
-}
 
 // ── Construction ────────────────────────────────────────────────────────
 
@@ -259,6 +137,8 @@ SidebarWidget::SidebarWidget( DeviceStore* store, Sessions* sessions, QWidget* p
     connect( pollTimer_, &QTimer::timeout, this,
              [ this ] { guarded( "showing the line counts", [ this ] { pollCounters(); } ); } );
 
+    clock_.start();
+
     // Sessions has started the first device scan; devicesChanged() fills
     // in the result.
     onDevicesChanged();
@@ -295,25 +175,28 @@ void SidebarWidget::onDevicesChanged()
 
 void SidebarWidget::reload()
 {
-    const auto known = store_->list();
-    const auto& attached = sessions_->attachedDevices();
+    showRoster( std::nullopt );
+}
 
-    // The devices seen before, then those adb lists, then those that run a
-    // session adb no longer lists.
-    QStringList serials;
-    for ( const auto& device : known ) {
-        serials << device.serial;
-    }
-    for ( const auto& device : attached ) {
-        if ( !serials.contains( device.serial ) ) {
-            serials << device.serial;
-        }
-    }
+void SidebarWidget::pollCounters()
+{
+    showRoster( clock_.elapsed() );
+}
+
+void SidebarWidget::showRoster( std::optional<qint64> pollAtMs )
+{
+    QList<RunningSession> running;
     const auto active = sessions_->activeSerials();
     for ( const auto& serial : active ) {
-        if ( !serials.contains( serial ) ) {
-            serials << serial;
-        }
+        running.append( { serial, sessions_->filePath( serial ), sessions_->counters( serial ) } );
+    }
+    const auto roster = deviceRoster( store_->list(), sessions_->attachedDevices(), running,
+                                      samples_, QDateTime::currentDateTime(), pollAtMs );
+    samples_ = roster.samples;
+
+    QStringList serials;
+    for ( const auto& row : roster.rows ) {
+        serials << row.serial;
     }
 
     // Later: a tile's own click (Forget) may have led here.
@@ -328,25 +211,21 @@ void SidebarWidget::reload()
         it = tileBySerial_.erase( it );
     }
 
-    for ( int i = 0; i < serials.size(); ++i ) {
-        const auto& serial = serials[ i ];
-        auto* tile = tileFor( serial );
+    for ( int i = 0; i < roster.rows.size(); ++i ) {
+        const auto& row = roster.rows[ i ];
+        auto* tile = tileFor( row.serial );
         if ( tiles_->indexOf( tile ) != i ) {
             tiles_->removeWidget( tile );
             tiles_->insertWidget( i, tile );
         }
-        const auto attachedIt
-            = std::find_if( attached.cbegin(), attached.cend(),
-                            [ &serial ]( const Device& d ) { return d.serial == serial; } );
-        const auto knownIt
-            = std::find_if( known.cbegin(), known.cend(),
-                            [ &serial ]( const KnownDevice& d ) { return d.serial == serial; } );
-        updateTile( tile, attachedIt != attached.cend() ? &*attachedIt : nullptr,
-                    knownIt != known.cend() ? &*knownIt : nullptr );
+        tile->setTitle( row.title );
+        tile->setState( row.state );
+        tile->setSummary( row.summary );
+        tile->setDetails( row.details );
     }
 
-    empty_->setVisible( serials.isEmpty() );
-    stopAll_->setEnabled( !active.isEmpty() );
+    empty_->setVisible( roster.rows.isEmpty() );
+    stopAll_->setEnabled( !running.isEmpty() );
 }
 
 DeviceTile* SidebarWidget::tileFor( const QString& serial )
@@ -372,78 +251,6 @@ DeviceTile* SidebarWidget::tileFor( const QString& serial )
     } );
     tileBySerial_.insert( serial, tile );
     return tile;
-}
-
-void SidebarWidget::updateTile( DeviceTile* tile, const Device* attached, const KnownDevice* known )
-{
-    const auto serial = tile->serial();
-
-    // The model adb names now, or else the one it named before.
-    QString model;
-    if ( attached && !attached->model.isEmpty() ) {
-        model = attached->model;
-    }
-    else if ( known ) {
-        model = known->model;
-    }
-    tile->setTitle( deviceTitle( serial, model ) );
-
-    TileState state = TileState::Disconnected;
-    if ( sessions_->isSessionActive( serial ) ) {
-        state = TileState::Running;
-    }
-    else if ( attached ) {
-        state = tileState( attached->state );
-    }
-    tile->setState( state );
-
-    QStringList summary{ QStringLiteral( "%1 · %2" )
-                             .arg( serial,
-                                   stateWords( state, attached ? attached->state : QString() ) ) };
-    if ( state == TileState::Running ) {
-        summary << QStringLiteral( "Writes %1" ).arg( sessions_->filePath( serial ) );
-    }
-    else if ( known && !known->savePath.isEmpty() ) {
-        summary << QStringLiteral( "Saves to %1" ).arg( known->savePath );
-    }
-    else {
-        summary << QStringLiteral( "Saves to the log directory" );
-    }
-    tile->setSummary( summary );
-    updateDetails( tile );
-}
-
-void SidebarWidget::updateDetails( DeviceTile* tile )
-{
-    const auto serial = tile->serial();
-    if ( !sessions_->isSessionActive( serial ) ) {
-        // A stopped tile shows only the device; a new session counts anew.
-        samples_.remove( serial );
-        tile->setDetails( {} );
-        return;
-    }
-    tile->setDetails( sessionDetails( sessions_->counters( serial ), samples_.value( serial ).rate,
-                                      QDateTime::currentDateTime() ) );
-}
-
-void SidebarWidget::pollCounters()
-{
-    for ( auto* tile : std::as_const( tileBySerial_ ) ) {
-        const auto serial = tile->serial();
-        if ( sessions_->isSessionActive( serial ) ) {
-            const auto lines = sessions_->counters( serial ).lines;
-            auto it = samples_.find( serial );
-            if ( it == samples_.end() ) {
-                it = samples_.insert( serial, {} );
-            }
-            else {
-                it->rate = ratePerSecond( lines - it->lines, it->since.elapsed() );
-            }
-            it->lines = lines;
-            it->since.start();
-        }
-        updateDetails( tile );
-    }
 }
 
 // ── Acting on a tile ────────────────────────────────────────────────────

@@ -27,14 +27,13 @@
  *   ┌ tile: Galaxy S23 · R5CR… ─────────────┐   unplugged: greyed, Forget
  *   └───────────────────────────────────────┘
  *
- * One tile (devicetile.h) per device: each device adb lists, in any state,
- * and each device seen before (devicestore.h), which stays while it is
- * unplugged — greyed out, Start disabled, with Forget — until it is
- * forgotten; also a device that runs a session adb no longer lists.
- * Devices seen before come first, in the order they were first seen.  A
- * tile is titled by the device's model and serial (deviceTitle()) and says
- * whether the device is connected, running, unauthorized, offline or
- * disconnected, and where it saves.
+ * One tile (devicetile.h) per row of the device roster (deviceroster.h):
+ * each device adb lists, in any state, and each device seen before
+ * (devicestore.h), which stays while it is unplugged — greyed out, Start
+ * disabled, with Forget — until it is forgotten; also a device that runs a
+ * session adb no longer lists.  The roster decides what each tile shows —
+ * its title, state, summary, details and rate; the tab only gathers what
+ * it needs, and adds, updates, reorders and removes the tiles to match.
  *
  * Start runs logcat for the device (sessions.h), followed in a new tab,
  * writing to the device's own save path or else to a new file in the log
@@ -48,14 +47,11 @@
  * once right as it is shown, and not while it is hidden.  A scan or a
  * session that starts, stops or rotates updates the tiles at once.
  *
- * A running tile shows its session's details (sessionDetails()): running
- * time and lines per second, lines and bytes, the current file's size and
- * the rotations so far, and when it rotates next — on request, as logcat
- * has no size limit.  A session's lines emit no signal, so the counters are
- * polled every kCounterPollMs (pollCounters()) while the tab shows, and
- * right as it is shown, the lines per second
- * measured between two polls, as LogSquirl-NATS's tiles do.  A stopped tile
- * shows only the device.
+ * A running tile shows its session's details (sessionDetails()).  A
+ * session's lines emit no signal, so the counters are polled every
+ * kCounterPollMs (pollCounters()) while the tab shows, and right as it is
+ * shown, the lines per second measured between two polls, as
+ * LogSquirl-NATS's tiles do.  A stopped tile shows only the device.
  *
  * Children named for tests: "settings", "stopAll", "empty" (the hint shown
  * without a tile), "deviceScan" (the rescan timer), "counterPoll" (the
@@ -72,13 +68,15 @@
 
 #pragma once
 
+#include "deviceroster.h"
+
 #include <QElapsedTimer>
 #include <QHash>
 #include <QString>
-#include <QStringList>
 #include <QWidget>
 
-class QDateTime;
+#include <optional>
+
 class QHideEvent;
 class QLabel;
 class QPushButton;
@@ -91,47 +89,6 @@ namespace logcat {
 class DeviceStore;
 class DeviceTile;
 class Sessions;
-struct Device;
-struct KnownDevice;
-struct SessionCounters;
-
-/**
- * The title of a device's tile: "<model> · <serial>", e.g.
- * "Pixel 8 · 3A1B…".  A serial longer than 8 characters is cut after its
- * first 4 (the summary shows it whole); without a model, the serial alone,
- * whole.
- */
-QString deviceTitle( const QString& serial, const QString& model );
-
-/// @p count with its thousands separated by commas, e.g. "12,345".
-QString formatCount( qint64 count );
-
-/// @p bytes in bytes below 1 KB ("512 B"), else to a tenth of the largest
-/// unit of 1024 it reaches, up to TB: "1.0 KB", "1.2 MB".
-QString formatSize( qint64 bytes );
-
-/// @p seconds as "m:ss", or "h:mm:ss" from an hour on: "0:05", "1:02:03".
-/// Less than 0 is "0:00".
-QString formatDuration( qint64 seconds );
-
-/// How many per second @p count in @p elapsedMs milliseconds is, rounded
-/// down; 0 for a count below 0 or no time.
-qint64 ratePerSecond( qint64 count, qint64 elapsedMs );
-
-/**
- * The details of a running session for its tile, at @p now:
- *
- *   running 1:02:03 · 120 lines/s     time since start, lines per second
- *   12,345 lines · 1.2 MB             since start, over all its files
- *   file 512.0 KB · 2 rotations       the current file, rotations so far
- *   rotates on request                when it rotates next
- *
- * @p linesPerSecond is the rate the caller measured.  "rotates on request":
- * a logcat session rotates only on ↻ Rotate; a session that rotated at a
- * size (SessionCounters::nextRotationBytes) would say "rotates at 10.0 MB".
- */
-QStringList sessionDetails( const SessionCounters& counters, qint64 linesPerSecond,
-                            const QDateTime& now );
 
 class SidebarWidget : public QWidget {
     Q_OBJECT
@@ -167,16 +124,9 @@ protected:
     void hideEvent( QHideEvent* event ) override;
 
 private:
-    /// The lines of a running session at the poll before, to measure its
-    /// rate by.
-    struct Sample {
-        qint64 lines = 0;    ///< Its lines at that poll.
-        qint64 rate = 0;     ///< Lines per second between that poll and the one before.
-        QElapsedTimer since; ///< Started at that poll.
-    };
-
-    /// Show on @p tile the details of its session, if it runs, else none.
-    void updateDetails( DeviceTile* tile );
+    /// Show the rows of the device roster (deviceroster.h) as they are now
+    /// on the tiles; @p pollAtMs (on clock_) also polls the counters.
+    void showRoster( std::optional<qint64> pollAtMs );
 
     /// Start logcat for @p serial, if it is ready.
     void start( const QString& serial );
@@ -193,10 +143,6 @@ private:
     /// The tile of @p serial, created (and connected) if it has none.
     DeviceTile* tileFor( const QString& serial );
 
-    /// Show on @p tile what its device is and does; @p attached is how adb
-    /// lists it (nullptr: not), @p known how the store remembers it.
-    void updateTile( DeviceTile* tile, const Device* attached, const KnownDevice* known );
-
     DeviceStore* store_;
     Sessions* sessions_;
     QPushButton* stopAll_;
@@ -205,8 +151,10 @@ private:
     QTimer* scanTimer_;
     QTimer* pollTimer_;
     QHash<QString, DeviceTile*> tileBySerial_;
-    /// The running sessions' samples, by serial.
-    QHash<QString, Sample> samples_;
+    /// The running sessions' samples, by serial, as the roster last returned.
+    QHash<QString, CounterSample> samples_;
+    /// The monotonic clock the polls are timed on; started at construction.
+    QElapsedTimer clock_;
 };
 
 } // namespace logcat

@@ -26,6 +26,7 @@ add_executable(logsquirl_logcat_tests
     devicestore_test.cpp
     devicetile_test.cpp
     sidebarwidget_test.cpp
+    deviceroster_test.cpp
     generatelogpath_test.cpp
     plugin_test.cpp
     presets_test.cpp
@@ -61,6 +62,7 @@ target_sources(logsquirl_logcat_tests
         "${CMAKE_SOURCE_DIR}/src/sessions.cpp"
         "${CMAKE_SOURCE_DIR}/src/devicewidget.cpp"
         "${CMAKE_SOURCE_DIR}/src/sidebarwidget.cpp"
+        "${CMAKE_SOURCE_DIR}/src/deviceroster.cpp"
         "${CMAKE_SOURCE_DIR}/src/devicestore.cpp"
         "${CMAKE_SOURCE_DIR}/src/devicetile.cpp"
         "${CMAKE_SOURCE_DIR}/src/settingsdialog.cpp"

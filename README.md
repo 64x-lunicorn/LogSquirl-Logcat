@@ -326,6 +326,9 @@ logsquirl-logcat/
 │   ├── devicewidget.cpp
 │   ├── sidebarwidget.h         # LogSquirl sidebar tab: one tile per device
 │   ├── sidebarwidget.cpp
+│   ├── deviceroster.h          # What each tile shows: devices + sessions → rows
+│   ├── deviceroster.cpp
+│   ├── tilestate.h             # A tile's state, shared by the roster and the tile
 │   ├── devicetile.h            # A device's tile (card): state, Start/Stop, Forget
 │   ├── devicetile.cpp
 │   ├── devicestore.h           # Devices seen before, save paths, log directory
@@ -340,6 +343,7 @@ logsquirl-logcat/
 │   ├── presets_test.cpp        # The shipped filter group and highlighter set
 │   ├── devicetile_test.cpp     # The tile on its own
 │   ├── devicestore_test.cpp    # Remembering devices, where logs go
+│   ├── deviceroster_test.cpp   # Table tests: what each tile shows
 │   ├── sidebarwidget_test.cpp  # The tab over a fake adb
 │   └── adbprocess_test.cpp
 └── docs/

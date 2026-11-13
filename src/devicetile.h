@@ -58,6 +58,8 @@
 
 #pragma once
 
+#include "tilestate.h"
+
 #include <QFrame>
 #include <QPointer>
 #include <QString>
@@ -68,16 +70,6 @@ class QLabel;
 class QPushButton;
 
 namespace logcat {
-
-/// What a tile's device is, and does.
-enum class TileState {
-    Disconnected, ///< Seen before, not attached now.
-    Connected,    ///< Attached and ready (adb's "device"), not running.
-    Running,      ///< Running logcat.
-    Unauthorized, ///< Attached, USB debugging not allowed (yet) on the device.
-    Offline,      ///< Attached, not answering adb.
-    Unavailable,  ///< Attached in another state ("no permissions", "recovery", …).
-};
 
 class DeviceTile : public QFrame {
     Q_OBJECT

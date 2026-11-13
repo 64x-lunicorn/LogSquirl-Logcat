@@ -42,6 +42,7 @@ add_library(logsquirl_logcat SHARED
     src/sessions.cpp
     src/devicewidget.cpp
     src/sidebarwidget.cpp
+    src/deviceroster.cpp
     src/devicestore.cpp
     src/devicetile.cpp
     src/settingsdialog.cpp

@@ -122,110 +122,6 @@ void rescan( Sessions& sessions )
 
 } // namespace
 
-SCENARIO( "a tile is titled by the model and the serial of its device", "[sidebarwidget]" )
-{
-    using logcat::deviceTitle;
-
-    THEN( "a long serial is cut after its first four characters" )
-    {
-        REQUIRE( deviceTitle( "3A1B2C3D4E5F", "Pixel 8" ) == "Pixel 8 · 3A1B…" );
-    }
-
-    THEN( "a short serial is shown whole" )
-    {
-        REQUIRE( deviceTitle( "ABC123", "Pixel 8" ) == "Pixel 8 · ABC123" );
-    }
-
-    THEN( "without a model, the serial is the title, whole" )
-    {
-        REQUIRE( deviceTitle( "emulator-5554", {} ) == "emulator-5554" );
-    }
-}
-
-SCENARIO( "a running tile's counts, sizes, rates and times are written to be read at a glance",
-          "[sidebarwidget]" )
-{
-    using logcat::formatCount;
-    using logcat::formatDuration;
-    using logcat::formatSize;
-    using logcat::ratePerSecond;
-
-    THEN( "a count has its thousands separated" )
-    {
-        REQUIRE( formatCount( 0 ) == "0" );
-        REQUIRE( formatCount( 999 ) == "999" );
-        REQUIRE( formatCount( 12345 ) == "12,345" );
-        REQUIRE( formatCount( 1234567 ) == "1,234,567" );
-    }
-
-    THEN( "a size is in bytes below a kilobyte, else in the largest unit, to a tenth" )
-    {
-        REQUIRE( formatSize( 0 ) == "0 B" );
-        REQUIRE( formatSize( 1023 ) == "1023 B" );
-        REQUIRE( formatSize( 1024 ) == "1.0 KB" );
-        REQUIRE( formatSize( 1536 ) == "1.5 KB" );
-        REQUIRE( formatSize( 1258291 ) == "1.2 MB" );
-        REQUIRE( formatSize( 5LL * 1024 * 1024 * 1024 ) == "5.0 GB" );
-        REQUIRE( formatSize( 3LL * 1024 * 1024 * 1024 * 1024 ) == "3.0 TB" );
-    }
-
-    THEN( "a duration is minutes and seconds, with hours once it has any" )
-    {
-        REQUIRE( formatDuration( 0 ) == "0:00" );
-        REQUIRE( formatDuration( 5 ) == "0:05" );
-        REQUIRE( formatDuration( 125 ) == "2:05" );
-        REQUIRE( formatDuration( 3723 ) == "1:02:03" );
-        REQUIRE( formatDuration( 100 * 3600 ) == "100:00:00" );
-        REQUIRE( formatDuration( -3 ) == "0:00" );
-    }
-
-    THEN( "a rate is how many per second over the time it was counted in" )
-    {
-        REQUIRE( ratePerSecond( 50, 1000 ) == 50 );
-        REQUIRE( ratePerSecond( 50, 500 ) == 100 );
-        REQUIRE( ratePerSecond( 3, 2000 ) == 1 );
-        REQUIRE( ratePerSecond( 0, 1000 ) == 0 );
-        REQUIRE( ratePerSecond( 50, 0 ) == 0 );
-        REQUIRE( ratePerSecond( -5, 1000 ) == 0 );
-    }
-}
-
-SCENARIO( "a running session's details say what it captured, how fast and for how long",
-          "[sidebarwidget]" )
-{
-    using logcat::sessionDetails;
-
-    GIVEN( "the counters of a session that has run an hour" )
-    {
-        logcat::SessionCounters counters;
-        counters.lines = 12345;
-        counters.bytes = 1258291;
-        counters.fileBytes = 524288;
-        counters.rotations = 2;
-        counters.startTime = QDateTime( QDate( 2026, 11, 12 ), QTime( 10, 0, 0 ) );
-        const auto now = counters.startTime.addSecs( 3723 );
-
-        THEN( "they show its time and rate, lines and bytes, file, rotations and next rotation" )
-        {
-            REQUIRE( sessionDetails( counters, 120, now )
-                     == QStringList{ "running 1:02:03 · 120 lines/s", "12,345 lines · 1.2 MB",
-                                     "file 512.0 KB · 2 rotations", "rotates on request" } );
-        }
-
-        THEN( "one rotation is one, not ones" )
-        {
-            counters.rotations = 1;
-            REQUIRE( sessionDetails( counters, 0, now )[ 2 ] == "file 512.0 KB · 1 rotation" );
-        }
-
-        THEN( "a session that rotated at a size would say at which" )
-        {
-            counters.nextRotationBytes = 10 * 1024 * 1024;
-            REQUIRE( sessionDetails( counters, 0, now )[ 3 ] == "rotates at 10.0 MB" );
-        }
-    }
-}
-
 #ifdef Q_OS_UNIX
 SCENARIO( "the sidebar has a tile for each device, plugged in or seen before", "[sidebarwidget]" )
 {
@@ -276,14 +172,12 @@ SCENARIO( "the sidebar has a tile for each device, plugged in or seen before", "
                 rescan( *sessions );
                 auto* tile = tileOf( *sidebar, "3A1B2C3D4E5F" );
 
-                THEN( "its tile stays, greyed out, Start disabled, with Forget" )
+                THEN( "its tile stays, disconnected, with Forget" )
                 {
+                    // What a disconnected tile says is the roster's
+                    // (deviceroster_test.cpp).
                     REQUIRE( tile );
                     REQUIRE( tile->state() == TileState::Disconnected );
-                    REQUIRE( tile->property( "disconnected" ).toBool() );
-                    REQUIRE( textOf( tile, "title" ) == "Pixel 8 · 3A1B…" );
-                    REQUIRE( textOf( tile, "summary" ).contains( "disconnected" ) );
-                    REQUIRE_FALSE( button( tile, "startStop" )->isEnabled() );
                     REQUIRE( button( tile, "forget" )->isVisibleTo( tile ) );
                 }
 
@@ -457,58 +351,32 @@ SCENARIO( "Start and Stop on a tile run logcat for its device", "[sidebarwidget]
 #endif
 
 #ifdef Q_OS_UNIX
-SCENARIO( "unauthorized and offline devices cannot be started", "[sidebarwidget]" )
+SCENARIO( "a device that is not ready cannot be started from its tile", "[sidebarwidget]" )
 {
-    GIVEN( "a sidebar with an unauthorized and an offline device" )
+    GIVEN( "a sidebar with the tile of a device seen before, not attached" )
     {
+        // Which states a tile shows is the roster's (deviceroster_test.cpp);
+        // the sidebar only checks a Start before it acts on it.
         FakeHost host;
         installAdbWithAttachedDevices( host );
-        attach( host, "NOAUTH456   unauthorized usb:1-2 transport_id:3\n"
-                      "OFFLINE123  offline transport_id:4\n" );
         DeviceStore store( host.configDir() + "/logcat.ini" );
+        store.remember( { { "NOAUTH456", "unauthorized", {} } } );
         Sessions sessions;
         const SidebarWidget sidebar( &store, &sessions );
-        REQUIRE( waitFor( [ &sessions ]() { return sessions.attachedDevices().size() == 2; } ) );
-        auto* unauthorized = tileOf( sidebar, "NOAUTH456" );
-        auto* offline = tileOf( sidebar, "OFFLINE123" );
-        REQUIRE( unauthorized );
-        REQUIRE( offline );
+        auto* tile = tileOf( sidebar, "NOAUTH456" );
+        REQUIRE( tile );
+        REQUIRE( tile->state() == TileState::Disconnected );
 
-        THEN( "each tile says so, and Start is disabled" )
-        {
-            REQUIRE( unauthorized->state() == TileState::Unauthorized );
-            REQUIRE( textOf( unauthorized, "summary" ).contains( "unauthorized" ) );
-            REQUIRE_FALSE( button( unauthorized, "startStop" )->isEnabled() );
-            REQUIRE( offline->state() == TileState::Offline );
-            REQUIRE( textOf( offline, "summary" ).contains( "offline" ) );
-            REQUIRE_FALSE( button( offline, "startStop" )->isEnabled() );
-        }
-
-        WHEN( "Start is asked for anyway, as a tile that still shows them connected would" )
+        WHEN( "Start is asked for anyway, as a tile that still shows it connected would" )
         {
             // The disabled button ignores a click: the tile's signal reaches
             // the sidebar's own check.
-            Q_EMIT unauthorized->startClicked();
-            Q_EMIT offline->startClicked();
+            Q_EMIT tile->startClicked();
 
             THEN( "nothing starts" )
             {
                 REQUIRE( sessions.activeSessionCount() == 0 );
                 REQUIRE( host.openedFiles.isEmpty() );
-            }
-        }
-
-        WHEN( "the unauthorized device is allowed" )
-        {
-            attach( host, "NOAUTH456   device usb:1-2 model:Galaxy_S23\n"
-                          "OFFLINE123  offline transport_id:4\n" );
-            rescan( sessions );
-
-            THEN( "its tile can be started, and learns its model" )
-            {
-                REQUIRE( unauthorized->state() == TileState::Connected );
-                REQUIRE( button( unauthorized, "startStop" )->isEnabled() );
-                REQUIRE( textOf( unauthorized, "title" ) == "Galaxy S23 · NOAU…" );
             }
         }
     }
