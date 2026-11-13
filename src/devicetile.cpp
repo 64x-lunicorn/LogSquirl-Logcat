@@ -23,6 +23,7 @@
  */
 
 #include "devicetile.h"
+#include "plugin.h"
 
 #include <QApplication>
 #include <QColor>
@@ -153,17 +154,25 @@ DeviceTile::DeviceTile( const QString& serial, QWidget* parent )
     layout->addWidget( details_ );
     layout->addLayout( foot );
 
+    // Each handler runs through guarded(): an exception must not unwind
+    // through Qt's event loop into the host.
     connect( startStop_, &QPushButton::clicked, this, [ this ] {
-        if ( state_ == TileState::Running ) {
-            Q_EMIT stopClicked();
-        }
-        else {
-            Q_EMIT startClicked();
-        }
+        guarded( "starting or stopping a capture", [ this ] {
+            if ( state_ == TileState::Running ) {
+                Q_EMIT stopClicked();
+            }
+            else {
+                Q_EMIT startClicked();
+            }
+        } );
     } );
-    connect( rotate_, &QPushButton::clicked, this, &DeviceTile::rotateClicked );
-    connect( savePath_, &QPushButton::clicked, this, &DeviceTile::savePathClicked );
-    connect( forget_, &QPushButton::clicked, this, &DeviceTile::forgetClicked );
+    connect( rotate_, &QPushButton::clicked, this,
+             [ this ] { guarded( "rotating a log", [ this ] { Q_EMIT rotateClicked(); } ); } );
+    connect( savePath_, &QPushButton::clicked, this, [ this ] {
+        guarded( "editing a save path", [ this ] { Q_EMIT savePathClicked(); } );
+    } );
+    connect( forget_, &QPushButton::clicked, this,
+             [ this ] { guarded( "forgetting a device", [ this ] { Q_EMIT forgetClicked(); } ); } );
 
     setState( TileState::Disconnected );
     watched_ = parentWidget();
@@ -234,32 +243,35 @@ void DeviceTile::setState( TileState state )
 void DeviceTile::changeEvent( QEvent* event )
 {
     QFrame::changeEvent( event );
-    switch ( event->type() ) {
-    case QEvent::ParentChange:
-        // Its stylesheet keeps a palette change of the parent from reaching
-        // the tile: it watches the parent itself.
-        if ( watched_ ) {
-            watched_->removeEventFilter( this );
+    // The event loop calls it: it runs through guarded(), as the handlers.
+    guarded( "styling a device tile", [ this, event ] {
+        switch ( event->type() ) {
+        case QEvent::ParentChange:
+            // Its stylesheet keeps a palette change of the parent from
+            // reaching the tile: it watches the parent itself.
+            if ( watched_ ) {
+                watched_->removeEventFilter( this );
+            }
+            watched_ = parentWidget();
+            if ( watched_ ) {
+                watched_->installEventFilter( this );
+            }
+            applyStyle();
+            break;
+        case QEvent::PaletteChange:
+        case QEvent::ApplicationPaletteChange:
+            applyStyle();
+            break;
+        default:
+            break;
         }
-        watched_ = parentWidget();
-        if ( watched_ ) {
-            watched_->installEventFilter( this );
-        }
-        applyStyle();
-        break;
-    case QEvent::PaletteChange:
-    case QEvent::ApplicationPaletteChange:
-        applyStyle();
-        break;
-    default:
-        break;
-    }
+    } );
 }
 
 bool DeviceTile::eventFilter( QObject* watched, QEvent* event )
 {
     if ( watched == watched_ && event->type() == QEvent::PaletteChange ) {
-        applyStyle();
+        guarded( "styling a device tile", [ this ] { applyStyle(); } );
     }
     return QFrame::eventFilter( watched, event );
 }

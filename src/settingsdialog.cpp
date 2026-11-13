@@ -96,21 +96,29 @@ SettingsDialog::SettingsDialog( DeviceStore* store, Sessions* sessions, QWidget*
     layout->addLayout( form );
     layout->addWidget( buttons );
 
-    connect( buttons, &QDialogButtonBox::accepted, this, &SettingsDialog::accept );
-    connect( buttons, &QDialogButtonBox::rejected, this, &SettingsDialog::reject );
+    // Each handler runs through guarded(): an exception must not unwind
+    // through Qt's event loop into the host.
+    connect( buttons, &QDialogButtonBox::accepted, this,
+             [ this ] { guarded( "saving the settings", [ this ] { accept(); } ); } );
+    connect( buttons, &QDialogButtonBox::rejected, this,
+             [ this ] { guarded( "closing the settings", [ this ] { reject(); } ); } );
     connect( browseLogDir, &QPushButton::clicked, this, [ this ] {
-        const auto dir = QFileDialog::getExistingDirectory(
-            this, QStringLiteral( "Select Log Directory" ), logDir_->text() );
-        if ( !dir.isEmpty() ) {
-            logDir_->setText( dir );
-        }
+        guarded( "choosing the log directory", [ this ] {
+            const auto dir = QFileDialog::getExistingDirectory(
+                this, QStringLiteral( "Select Log Directory" ), logDir_->text() );
+            if ( !dir.isEmpty() ) {
+                logDir_->setText( dir );
+            }
+        } );
     } );
     connect( browseAdb, &QPushButton::clicked, this, [ this ] {
-        const auto path = QFileDialog::getOpenFileName(
-            this, QStringLiteral( "Select the adb Executable" ), adbPath_->text() );
-        if ( !path.isEmpty() ) {
-            adbPath_->setText( path );
-        }
+        guarded( "choosing the adb executable", [ this ] {
+            const auto path = QFileDialog::getOpenFileName(
+                this, QStringLiteral( "Select the adb Executable" ), adbPath_->text() );
+            if ( !path.isEmpty() ) {
+                adbPath_->setText( path );
+            }
+        } );
     } );
 }
 

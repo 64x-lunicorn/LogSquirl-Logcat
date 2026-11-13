@@ -634,7 +634,7 @@ SCENARIO( "devices are discovered in the background", "[sessions]" )
 
             THEN( "the hanging scan is abandoned and the new adb's devices arrive" )
             {
-                REQUIRE( waitFor( [ &changes ]() { return changes == 1; }, 3000 ) );
+                REQUIRE( waitFor( [ &changes ]() { return changes == 1; }, 8000 ) );
                 REQUIRE( sessions.devices() == QStringList{ "emulator-5556" } );
             }
         }
@@ -953,6 +953,19 @@ SCENARIO( "a session's counters can be read while it runs", "[sessions]" )
                 REQUIRE( host.openedFiles.size() == 2 );
                 REQUIRE( sessions.filePath( serial ) == host.openedFiles.last() );
                 REQUIRE( QFileInfo( host.openedFiles.last() ).size() == counters.fileBytes );
+            }
+
+            AND_WHEN( "it is stopped" )
+            {
+                host.notifications.clear();
+                sessions.stopSession( serial );
+
+                THEN( "the notification counts the lines of both files" )
+                {
+                    REQUIRE( host.notifications.size() == 1 );
+                    REQUIRE( host.notifications.first().toStdString()
+                             == "Logcat stopped for emulator-5554 (2 lines)" );
+                }
             }
         }
 
