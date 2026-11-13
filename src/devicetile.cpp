@@ -23,6 +23,7 @@
  */
 
 #include "devicetile.h"
+#include "plugin.h"
 
 #include <QApplication>
 #include <QColor>
@@ -153,17 +154,25 @@ DeviceTile::DeviceTile( const QString& serial, QWidget* parent )
     layout->addWidget( details_ );
     layout->addLayout( foot );
 
+    // Each handler runs through guarded(): an exception must not unwind
+    // through Qt's event loop into the host.
     connect( startStop_, &QPushButton::clicked, this, [ this ] {
-        if ( state_ == TileState::Running ) {
-            Q_EMIT stopClicked();
-        }
-        else {
-            Q_EMIT startClicked();
-        }
+        guarded( "starting or stopping a capture", [ this ] {
+            if ( state_ == TileState::Running ) {
+                Q_EMIT stopClicked();
+            }
+            else {
+                Q_EMIT startClicked();
+            }
+        } );
     } );
-    connect( rotate_, &QPushButton::clicked, this, &DeviceTile::rotateClicked );
-    connect( savePath_, &QPushButton::clicked, this, &DeviceTile::savePathClicked );
-    connect( forget_, &QPushButton::clicked, this, &DeviceTile::forgetClicked );
+    connect( rotate_, &QPushButton::clicked, this,
+             [ this ] { guarded( "rotating a log", [ this ] { Q_EMIT rotateClicked(); } ); } );
+    connect( savePath_, &QPushButton::clicked, this, [ this ] {
+        guarded( "editing a save path", [ this ] { Q_EMIT savePathClicked(); } );
+    } );
+    connect( forget_, &QPushButton::clicked, this,
+             [ this ] { guarded( "forgetting a device", [ this ] { Q_EMIT forgetClicked(); } ); } );
 
     setState( TileState::Disconnected );
     watched_ = parentWidget();

@@ -43,6 +43,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QInputDialog>
+#include <QPushButton>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QWidget>
@@ -505,6 +506,110 @@ SCENARIO( "no exception leaves an entry point", "[plugin]" )
         }
     }
 }
+
+#ifdef Q_OS_UNIX
+namespace {
+
+/** Run the event loop until @p host has logged a failure of @p what. */
+bool waitForLoggedFailure( const FakeHost& host, const QString& what )
+{
+    const auto failure = QString( "Logcat plugin: %1 failed: the log is full" ).arg( what );
+    bool logged = false;
+    REQUIRE_NOTHROW( logged
+                     = waitFor( [ &host, &failure ]() { return host.logs.contains( failure ); } ) );
+    return logged;
+}
+
+/** The Start/Stop button of the sidebar's tile of @p serial. */
+QPushButton* tileStartStop( const QString& serial )
+{
+    const auto tiles = logcat::g_state.sidebarWidget->findChildren<logcat::DeviceTile*>();
+    for ( auto* tile : tiles ) {
+        if ( tile->serial() == serial ) {
+            return tile->findChild<QPushButton*>( "startStop" );
+        }
+    }
+    return nullptr;
+}
+
+} // namespace
+
+SCENARIO( "no exception leaves a handler that the event loop calls", "[plugin]" )
+{
+    GIVEN( "a host whose log throws on the result of a device scan" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        host.failLogContaining = "Discovered";
+
+        WHEN( "the plugin is initialised and its first device scan ends" )
+        {
+            REQUIRE( logsquirl_plugin_init( host.api(), &host ) == 0 );
+
+            THEN( "the failure is logged through the host, and a later scan works" )
+            {
+                REQUIRE( waitForLoggedFailure( host, "reading the device list" ) );
+                host.failLogContaining.clear();
+                logcat::g_state.sessions->refreshDevices();
+                REQUIRE( waitFor( []() {
+                    return logcat::g_state.sessions->devices() == QStringList{ "emulator-5554" };
+                } ) );
+            }
+
+            logsquirl_plugin_shutdown();
+        }
+    }
+
+    GIVEN( "a host whose log throws on the error of an adb that exits" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host, "exit 3\n" );
+        REQUIRE( logsquirl_plugin_init( host.api(), &host ) == 0 );
+        REQUIRE( waitFor( []() { return !logcat::g_state.sessions->devices().isEmpty(); } ) );
+        host.failLogContaining = "exited with code 3";
+
+        WHEN( "a capture starts, and its adb exits" )
+        {
+            REQUIRE( logcat::g_state.sessions->startSession( "emulator-5554" ) );
+
+            THEN( "the failure is logged through the host, and the session still ends" )
+            {
+                REQUIRE( waitForLoggedFailure( host, "reporting a logcat error" ) );
+                REQUIRE( waitFor( []() {
+                    return !logcat::g_state.sessions->isSessionActive( "emulator-5554" );
+                } ) );
+            }
+        }
+
+        logsquirl_plugin_shutdown();
+    }
+
+    GIVEN( "a host whose log throws when a capture starts" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        REQUIRE( logsquirl_plugin_init( host.api(), &host ) == 0 );
+        REQUIRE( waitFor( []() {
+            const auto* button = tileStartStop( "emulator-5554" );
+            return button && button->isEnabled();
+        } ) );
+        host.failLogContaining = "Started logcat";
+
+        WHEN( "the user clicks Start on the device's tile in the sidebar" )
+        {
+            REQUIRE_NOTHROW( tileStartStop( "emulator-5554" )->click() );
+
+            THEN( "the failure is logged through the host" )
+            {
+                REQUIRE( waitForLoggedFailure( host, "starting a capture" ) );
+            }
+        }
+
+        host.failLogContaining.clear();
+        logsquirl_plugin_shutdown();
+    }
+}
+#endif
 #endif
 
 SCENARIO( "the plugin learns which functions the host has from the size of its table", "[plugin]" )

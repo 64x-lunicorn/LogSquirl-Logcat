@@ -90,17 +90,27 @@ Sessions::Sessions( QObject* parent )
     : QObject( parent )
 {
     scanProcess_ = new QProcess( this );
-    connect( scanProcess_, &QProcess::finished, this, &Sessions::onScanFinished );
-    connect(
-        scanProcess_, &QProcess::errorOccurred, this, [ this ]( QProcess::ProcessError error ) {
-            // No finished() follows a failed start
-            if ( error == QProcess::FailedToStart ) {
-                scanTimeout_->stop();
-                onScanFailed( "adb devices could not be started: " + scanProcess_->errorString() );
-                setDevices( {} );
-                onScanEnded();
-            }
-        } );
+    // Each handler runs through guarded(): an exception must not unwind
+    // through Qt's event loop into the host.
+    connect( scanProcess_, &QProcess::finished, this,
+             [ this ]( int exitCode, QProcess::ExitStatus exitStatus ) {
+                 guarded( "reading the device list", [ this, exitCode, exitStatus ] {
+                     onScanFinished( exitCode, exitStatus );
+                 } );
+             } );
+    connect( scanProcess_, &QProcess::errorOccurred, this,
+             [ this ]( QProcess::ProcessError error ) {
+                 guarded( "reporting a device scan error", [ this, error ] {
+                     // No finished() follows a failed start
+                     if ( error == QProcess::FailedToStart ) {
+                         scanTimeout_->stop();
+                         onScanFailed( "adb devices could not be started: "
+                                       + scanProcess_->errorString() );
+                         setDevices( {} );
+                         onScanEnded();
+                     }
+                 } );
+             } );
 
     // The first scan may need to start the ADB server, which can take
     // several seconds; give up after 10.
@@ -108,8 +118,10 @@ Sessions::Sessions( QObject* parent )
     scanTimeout_->setSingleShot( true );
     scanTimeout_->setInterval( 10000 );
     connect( scanTimeout_, &QTimer::timeout, this, [ this ]() {
-        onScanFailed( "adb devices timed out." );
-        scanProcess_->kill();
+        guarded( "ending a device scan that timed out", [ this ] {
+            onScanFailed( "adb devices timed out." );
+            scanProcess_->kill();
+        } );
     } );
 
     refreshDevices();
@@ -256,11 +268,14 @@ bool Sessions::startSession( const QString& serial, const QString& savePath )
 
     auto* proc = new AdbProcess( serial, savePath, this );
 
-    connect( proc, &AdbProcess::finished, this,
-             [ this, serial ]( int ) { onSessionFinished( serial ); } );
+    connect( proc, &AdbProcess::finished, this, [ this, serial ]( int ) {
+        guarded( "ending a logcat session", [ this, &serial ] { onSessionFinished( serial ); } );
+    } );
 
-    connect( proc, &AdbProcess::errorOccurred, this,
-             [ this, serial ]( const QString& msg ) { onSessionError( serial, msg ); } );
+    connect( proc, &AdbProcess::errorOccurred, this, [ this, serial ]( const QString& msg ) {
+        guarded( "reporting a logcat error",
+                 [ this, &serial, &msg ] { onSessionError( serial, msg ); } );
+    } );
 
     if ( !proc->start() ) {
         // start() has reported why through errorOccurred()
