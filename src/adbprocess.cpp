@@ -26,7 +26,7 @@
  *   1. The owner gives it the `adb` executable, which Settings::findAdb()
  *      found (settings.h).
  *
- *   2. Sessions (sessions.h) runs `adb devices` in the background, and
+ *   2. DeviceScan (devicescan.h) runs `adb devices` in the background, and
  *      parseDevices() reads every device of its tabular output (`adb
  *      devices -l`: serial, state, model); parseDeviceList() keeps the
  *      serials of those in the "device" state.
