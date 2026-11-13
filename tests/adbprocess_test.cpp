@@ -21,10 +21,11 @@
  * @file adbprocess_test.cpp
  * @brief BDD tests for AdbProcess instance behaviour.
  *
- * Tests basic construction, property accessors, and configDir fallback
- * without requiring a running ADB daemon.  Starting a session runs a
- * stand-in for adb (see fakeadb.h); the scenarios that need a working
- * one use a shell script and only run on Unix.
+ * Tests basic construction and property accessors without requiring a
+ * running ADB daemon.  Starting a session runs a stand-in for adb (see
+ * fakeadb.h), which the host's settings find; the scenarios that need a
+ * working one use a shell script and only run on Unix.  Finding adb is
+ * settings_test.cpp's.
  */
 
 #include <catch2/catch.hpp>
@@ -33,19 +34,21 @@
 #include "fakeadb.h"
 #include "plugin.h"
 #include "readonlydir.h"
-#include "scopedenv.h"
+#include "tempdirs.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
-#include <QSettings>
+#include <QPointer>
 #include <QTemporaryDir>
+
+#include <algorithm>
 
 #ifdef Q_OS_UNIX
 #include <csignal>
 #include <sys/resource.h>
-#include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 #endif
@@ -53,7 +56,6 @@
 using logcat::AdbProcess;
 using logcat_test::FakeHost;
 using logcat_test::ReadOnlyDir;
-using logcat_test::ScopedEnv;
 using logcat_test::waitFor;
 
 namespace {
@@ -72,36 +74,13 @@ void touch( const QString& path )
 }
 #endif
 
-/**
- * Create an Android SDK in @p sdk with an adb in platform-tools, named as
- * the SDK names it on this platform, and return its path.
- */
-QString installSdkAdb( const QString& sdk )
-{
-#ifdef Q_OS_WIN
-    const auto path = sdk + "/platform-tools/adb.exe";
-#else
-    const auto path = sdk + "/platform-tools/adb";
-#endif
-    REQUIRE( QDir().mkpath( sdk + "/platform-tools" ) );
-    QFile file( path );
-    REQUIRE( file.open( QIODevice::WriteOnly ) );
-    file.write( "#!/bin/sh\n" );
-    file.setPermissions( file.permissions() | QFileDevice::ExeOwner );
-    return path;
-}
-
-bool isSameFile( const QString& a, const QString& b )
-{
-    return !a.isEmpty() && QFileInfo( a ).canonicalFilePath() == QFileInfo( b ).canonicalFilePath();
-}
 } // namespace
 
 SCENARIO( "AdbProcess construction and properties", "[adbprocess]" )
 {
     GIVEN( "a freshly constructed AdbProcess" )
     {
-        AdbProcess proc( "emulator-5554" );
+        AdbProcess proc( {}, "emulator-5554" );
 
         THEN( "the serial matches the constructor argument" )
         {
@@ -113,99 +92,9 @@ SCENARIO( "AdbProcess construction and properties", "[adbprocess]" )
             REQUIRE_FALSE( proc.isRunning() );
         }
 
-        THEN( "line count starts at zero" )
+        THEN( "no line has been counted" )
         {
-            REQUIRE( proc.lineCount() == 0 );
-        }
-    }
-}
-
-SCENARIO( "no adb override is read while the plugin is not initialised", "[adbprocess]" )
-{
-    GIVEN( "the plugin is not initialised, and a logcat.ini in the temporary directory" )
-    {
-        // Ensure clean state — no host API available.
-        logcat::g_state.api = nullptr;
-        logcat::g_state.handle = nullptr;
-        logcat::g_state.initialised = false;
-
-        // A temporary directory that every local user can write to, such
-        // as /tmp, with an override another user planted.
-        QTemporaryDir sharedTemp;
-        const ScopedEnv tmpdir( "TMPDIR", QFile::encodeName( sharedTemp.path() ) );
-        const ScopedEnv tmp( "TMP", QFile::encodeName( sharedTemp.path() ) );
-        const ScopedEnv temp( "TEMP", QFile::encodeName( sharedTemp.path() ) );
-        const auto planted = sharedTemp.filePath( "planted-adb" );
-        {
-            QFile file( planted );
-            REQUIRE( file.open( QIODevice::WriteOnly ) );
-        }
-        {
-            QSettings settings( sharedTemp.filePath( "logcat.ini" ), QSettings::IniFormat );
-            settings.setValue( "adb/path", planted );
-        }
-
-        THEN( "configDir() is empty" )
-        {
-            REQUIRE( AdbProcess::configDir().isEmpty() );
-        }
-
-        THEN( "findAdb() does not use the planted override" )
-        {
-            REQUIRE_FALSE( isSameFile( AdbProcess::findAdb(), planted ) );
-        }
-    }
-}
-
-SCENARIO( "findAdb returns a path or empty string", "[adbprocess]" )
-{
-    GIVEN( "no special environment setup" )
-    {
-        WHEN( "calling findAdb()" )
-        {
-            const auto adbPath = AdbProcess::findAdb();
-
-            THEN( "the result is either empty or points to an existing file" )
-            {
-                if ( !adbPath.isEmpty() ) {
-                    REQUIRE( QFileInfo::exists( adbPath ) );
-                }
-                // If ADB is not installed, empty is the correct result — no assertion needed.
-                SUCCEED();
-            }
-        }
-    }
-}
-
-SCENARIO( "findAdb finds the adb of the Android SDK", "[adbprocess]" )
-{
-    GIVEN( "an SDK with adb in platform-tools, and no override" )
-    {
-        FakeHost host;
-        QTemporaryDir sdk;
-        QTemporaryDir emptySdk;
-        const auto adb = installSdkAdb( sdk.path() );
-
-        WHEN( "ANDROID_HOME names the SDK" )
-        {
-            const ScopedEnv home( "ANDROID_HOME", QFile::encodeName( sdk.path() ) );
-            const ScopedEnv root( "ANDROID_SDK_ROOT", QFile::encodeName( emptySdk.path() ) );
-
-            THEN( "its adb is found" )
-            {
-                REQUIRE( isSameFile( AdbProcess::findAdb(), adb ) );
-            }
-        }
-
-        WHEN( "ANDROID_SDK_ROOT names the SDK, and ANDROID_HOME one without adb" )
-        {
-            const ScopedEnv home( "ANDROID_HOME", QFile::encodeName( emptySdk.path() ) );
-            const ScopedEnv root( "ANDROID_SDK_ROOT", QFile::encodeName( sdk.path() ) );
-
-            THEN( "its adb is found" )
-            {
-                REQUIRE( isSameFile( AdbProcess::findAdb(), adb ) );
-            }
+            REQUIRE( proc.counters().lines == 0 );
         }
     }
 }
@@ -214,7 +103,7 @@ SCENARIO( "rotateLog does nothing while no session runs", "[adbprocess]" )
 {
     GIVEN( "an AdbProcess that has not been started" )
     {
-        AdbProcess proc( "test-device" );
+        AdbProcess proc( {}, "test-device" );
 
         WHEN( "rotateLog is called" )
         {
@@ -223,7 +112,7 @@ SCENARIO( "rotateLog does nothing while no session runs", "[adbprocess]" )
             THEN( "it returns an empty path and the line count stays at 0" )
             {
                 REQUIRE( result.isEmpty() );
-                REQUIRE( proc.lineCount() == 0 );
+                REQUIRE( proc.counters().lines == 0 );
             }
         }
     }
@@ -231,6 +120,27 @@ SCENARIO( "rotateLog does nothing while no session runs", "[adbprocess]" )
 
 SCENARIO( "start reports whether adb could be launched", "[adbprocess]" )
 {
+    GIVEN( "no adb" )
+    {
+        FakeHost host;
+        QStringList errors;
+        AdbProcess proc( {}, "emulator-5554" );
+        QObject::connect( &proc, &AdbProcess::errorOccurred,
+                          [ &errors ]( const QString& message ) { errors << message; } );
+
+        WHEN( "starting the session" )
+        {
+            const auto started = proc.start();
+
+            THEN( "start() fails and says that adb was not found" )
+            {
+                REQUIRE_FALSE( started );
+                REQUIRE( errors.size() == 1 );
+                REQUIRE( errors.first().contains( "ADB executable not found" ) );
+            }
+        }
+    }
+
     GIVEN( "an adb that cannot be executed" )
     {
         FakeHost host;
@@ -239,7 +149,7 @@ SCENARIO( "start reports whether adb could be launched", "[adbprocess]" )
         const auto savePath = logDir.filePath( "capture.log" );
 
         QStringList errors;
-        AdbProcess proc( "emulator-5554", savePath );
+        AdbProcess proc( host.settings().findAdb(), "emulator-5554", savePath );
         QObject::connect( &proc, &AdbProcess::errorOccurred,
                           [ &errors ]( const QString& message ) { errors << message; } );
 
@@ -261,32 +171,7 @@ SCENARIO( "start reports whether adb could be launched", "[adbprocess]" )
             THEN( "no empty log file is left behind" )
             {
                 REQUIRE_FALSE( QFileInfo::exists( savePath ) );
-                REQUIRE( proc.tempFilePath().isEmpty() );
-            }
-        }
-    }
-
-    GIVEN( "an adb that cannot be executed and a save path that already holds a capture" )
-    {
-        FakeHost host;
-        logcat_test::installBrokenAdb( host );
-        QTemporaryDir logDir;
-        const auto savePath = logDir.filePath( "capture.log" );
-        {
-            QFile existing( savePath );
-            REQUIRE( existing.open( QIODevice::WriteOnly ) );
-            existing.write( "earlier capture\n" );
-        }
-
-        AdbProcess proc( "emulator-5554", savePath );
-
-        WHEN( "starting the session fails" )
-        {
-            REQUIRE_FALSE( proc.start() );
-
-            THEN( "the earlier capture is kept" )
-            {
-                REQUIRE( QFileInfo::exists( savePath ) );
+                REQUIRE( proc.logFilePath().isEmpty() );
             }
         }
     }
@@ -297,7 +182,7 @@ SCENARIO( "start reports whether adb could be launched", "[adbprocess]" )
         FakeHost host;
         logcat_test::installFakeAdb( host );
 
-        AdbProcess proc( "emulator-5554" );
+        AdbProcess proc( host.settings().findAdb(), "emulator-5554" );
 
         WHEN( "starting the session" )
         {
@@ -307,37 +192,12 @@ SCENARIO( "start reports whether adb could be launched", "[adbprocess]" )
             {
                 REQUIRE( started );
                 REQUIRE( proc.isRunning() );
-                REQUIRE( waitFor( [ &proc ]() { return proc.lineCount() == 2; } ) );
-                REQUIRE( readFile( proc.tempFilePath() ) == "first\nsecond\n" );
+                REQUIRE( waitFor( [ &proc ]() { return proc.counters().lines == 2; } ) );
+                REQUIRE( readFile( proc.logFilePath() ) == "first\nsecond\n" );
             }
         }
     }
 
-    GIVEN( "a working adb and a save path that already holds a capture" )
-    {
-        FakeHost host;
-        logcat_test::installFakeAdb( host );
-        QTemporaryDir logDir;
-        const auto savePath = logDir.filePath( "capture.log" );
-        {
-            QFile existing( savePath );
-            REQUIRE( existing.open( QIODevice::WriteOnly ) );
-            existing.write( "earlier capture\n" );
-        }
-
-        AdbProcess proc( "emulator-5554", savePath );
-
-        WHEN( "the session runs" )
-        {
-            REQUIRE( proc.start() );
-            REQUIRE( waitFor( [ &proc ]() { return proc.lineCount() == 2; } ) );
-
-            THEN( "the new output is appended to the earlier capture" )
-            {
-                REQUIRE( readFile( savePath ) == "earlier capture\nfirst\nsecond\n" );
-            }
-        }
-    }
 #endif
 }
 
@@ -349,11 +209,11 @@ SCENARIO( "rotateLog moves the capture to a new file", "[adbprocess]" )
         FakeHost host;
         logcat_test::installFakeAdb( host );
         QTemporaryDir logDir;
-        const auto savePath = AdbProcess::generateLogPath( logDir.path(), "emulator-5554" );
+        const auto savePath = logcat::LogFile::generateLogPath( logDir.path(), "emulator-5554" );
 
-        AdbProcess proc( "emulator-5554", savePath );
+        AdbProcess proc( host.settings().findAdb(), "emulator-5554", savePath );
         REQUIRE( proc.start() );
-        REQUIRE( waitFor( [ &proc ]() { return proc.lineCount() == 2; } ) );
+        REQUIRE( waitFor( [ &proc ]() { return proc.counters().lines == 2; } ) );
 
         WHEN( "rotating within the same second" )
         {
@@ -363,67 +223,13 @@ SCENARIO( "rotateLog moves the capture to a new file", "[adbprocess]" )
             {
                 REQUIRE_FALSE( newPath.isEmpty() );
                 REQUIRE( newPath != savePath );
-                REQUIRE( proc.tempFilePath() == newPath );
+                REQUIRE( proc.logFilePath() == newPath );
                 REQUIRE( QFileInfo::exists( newPath ) );
             }
 
             THEN( "the old file keeps its content" )
             {
                 REQUIRE( readFile( savePath ) == "first\nsecond\n" );
-            }
-        }
-    }
-
-    GIVEN( "a running session writing to a save path in the home directory, given with ~" )
-    {
-        FakeHost host;
-        logcat_test::installFakeAdb( host );
-        QTemporaryDir home;
-        const ScopedEnv homeEnv( "HOME", QFile::encodeName( home.path() ) );
-
-        AdbProcess proc( "emulator-5554", "~/capture.log" );
-        REQUIRE( proc.start() );
-        REQUIRE( waitFor( [ &proc ]() { return proc.lineCount() == 2; } ) );
-
-        WHEN( "rotating" )
-        {
-            const auto newPath = proc.rotateLog();
-
-            THEN( "the capture continues in a new file in the home directory" )
-            {
-                REQUIRE_FALSE( newPath.isEmpty() );
-                REQUIRE( QFileInfo( newPath ).absolutePath() == QDir::cleanPath( home.path() ) );
-                REQUIRE( QFileInfo::exists( newPath ) );
-            }
-        }
-
-        proc.stop();
-    }
-
-    GIVEN( "a running session writing to a temporary file" )
-    {
-        FakeHost host;
-        logcat_test::installFakeAdb( host );
-
-        AdbProcess proc( "192.168.1.5:5555" );
-        REQUIRE( proc.start() );
-        REQUIRE( waitFor( [ &proc ]() { return proc.lineCount() == 2; } ) );
-        const auto oldPath = proc.tempFilePath();
-
-        WHEN( "rotating" )
-        {
-            const auto newPath = proc.rotateLog();
-
-            THEN( "neither file name contains the serial's ':'" )
-            {
-                REQUIRE_FALSE( newPath.isEmpty() );
-                REQUIRE_FALSE( QFileInfo( oldPath ).fileName().contains( ':' ) );
-                REQUIRE_FALSE( QFileInfo( newPath ).fileName().contains( ':' ) );
-            }
-
-            THEN( "the old file keeps its content" )
-            {
-                REQUIRE( readFile( oldPath ) == "first\nsecond\n" );
             }
         }
     }
@@ -442,11 +248,11 @@ SCENARIO( "rotateLog moves the capture to a new file", "[adbprocess]" )
         const auto savePath = logDir.filePath( "capture.log" );
 
         QStringList errors;
-        AdbProcess proc( "emulator-5554", savePath );
+        AdbProcess proc( host.settings().findAdb(), "emulator-5554", savePath );
         QObject::connect( &proc, &AdbProcess::errorOccurred,
                           [ &errors ]( const QString& message ) { errors << message; } );
         REQUIRE( proc.start() );
-        REQUIRE( waitFor( [ &proc ]() { return proc.lineCount() == 1; } ) );
+        REQUIRE( waitFor( [ &proc ]() { return proc.counters().lines == 1; } ) );
 
         WHEN( "rotating fails" )
         {
@@ -466,9 +272,8 @@ SCENARIO( "rotateLog moves the capture to a new file", "[adbprocess]" )
 
             THEN( "later output still reaches the old file" )
             {
-                REQUIRE( proc.tempFilePath() == savePath );
-                REQUIRE( waitFor( [ &proc ]() { return proc.lineCount() == 2; } ) );
-                REQUIRE( readFile( savePath ) == "first\nafter\n" );
+                REQUIRE( proc.logFilePath() == savePath );
+                REQUIRE( waitFor( [ &proc ]() { return proc.counters().lines == 2; } ) );
             }
         }
 
@@ -497,6 +302,182 @@ SCENARIO( "rotateLog moves the capture to a new file", "[adbprocess]" )
 #endif
 
 #ifdef Q_OS_UNIX
+SCENARIO( "the stop log line counts the lines of every file after a Rotate", "[adbprocess]" )
+{
+    GIVEN( "a session that wrote a line, rotated, then wrote another" )
+    {
+        FakeHost host;
+        const auto trigger = host.configDir() + "/go";
+        logcat_test::installFakeAdb( host, logcat_test::scriptWaitingFor( trigger ) );
+
+        AdbProcess proc( host.settings().findAdb(), "emulator-5554" );
+        REQUIRE( proc.start() );
+        REQUIRE( waitFor( [ &proc ]() { return proc.counters().lines == 1; } ) );
+        REQUIRE_FALSE( proc.rotateLog().isEmpty() );
+        touch( trigger );
+        REQUIRE( waitFor( [ &proc ]() { return proc.counters().lines == 2; } ) );
+
+        WHEN( "it is stopped" )
+        {
+            proc.stop();
+
+            THEN( "the host log counts both lines, not only the last file's" )
+            {
+                REQUIRE( host.logs
+                             .filter( "Stopped logcat for device emulator-5554 (2 lines "
+                                      "captured)" )
+                             .size()
+                         == 1 );
+            }
+        }
+    }
+}
+#endif
+
+#ifdef Q_OS_UNIX
+SCENARIO( "end() ends a session and keeps its file for its tab", "[adbprocess]" )
+{
+    GIVEN( "a running session writing to a temporary file, with listeners" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        int signalCount = 0;
+        QPointer<AdbProcess> proc = new AdbProcess( host.settings().findAdb(), "emulator-5554" );
+        QObject::connect( proc, &AdbProcess::finished, [ &signalCount ]( int ) { ++signalCount; } );
+        QObject::connect( proc, &AdbProcess::errorOccurred,
+                          [ &signalCount ]( const QString& ) { ++signalCount; } );
+        REQUIRE( proc->start() );
+        const auto file = proc->logFilePath();
+
+        WHEN( "it is ended, and the event loop has run" )
+        {
+            proc->end();
+            QCoreApplication::sendPostedEvents( nullptr, QEvent::DeferredDelete );
+
+            THEN( "adb is stopped, without a signal to the listeners" )
+            {
+                REQUIRE( host.logs.filter( "Stopped logcat for device emulator-5554" ).size()
+                         == 1 );
+                REQUIRE( signalCount == 0 );
+            }
+
+            THEN( "the session is deleted, and its file kept" )
+            {
+                REQUIRE( proc.isNull() );
+                REQUIRE( QFileInfo::exists( file ) );
+            }
+
+            AND_WHEN( "LogSquirl quits" )
+            {
+                logcat::removeOwnTempDirs( host.tempRoot() );
+
+                THEN( "the file is removed" )
+                {
+                    REQUIRE_FALSE( QFileInfo::exists( file ) );
+                }
+            }
+        }
+    }
+
+    GIVEN( "a session whose adb has exited on its own" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host, "printf 'only\\n'\n" );
+        QPointer<AdbProcess> proc = new AdbProcess( host.settings().findAdb(), "emulator-5554" );
+        bool finished = false;
+        QObject::connect( proc, &AdbProcess::finished, [ &finished ]( int ) { finished = true; } );
+        REQUIRE( proc->start() );
+        const auto file = proc->logFilePath();
+        REQUIRE( waitFor( [ &finished ]() { return finished; } ) );
+
+        WHEN( "it is ended, and the event loop has run" )
+        {
+            proc->end();
+            QCoreApplication::sendPostedEvents( nullptr, QEvent::DeferredDelete );
+
+            THEN( "the session is deleted, and its file kept with what adb wrote" )
+            {
+                REQUIRE( proc.isNull() );
+                REQUIRE( readFile( file ) == "only\n" );
+            }
+        }
+    }
+
+    GIVEN( "a running session that has been rotated" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        QPointer<AdbProcess> proc = new AdbProcess( host.settings().findAdb(), "emulator-5554" );
+        REQUIRE( proc->start() );
+        const auto first = proc->logFilePath();
+        const auto second = proc->rotateLog();
+        REQUIRE_FALSE( second.isEmpty() );
+
+        WHEN( "it is ended, and the event loop has run" )
+        {
+            proc->end();
+            QCoreApplication::sendPostedEvents( nullptr, QEvent::DeferredDelete );
+
+            THEN( "the files of both tabs are kept" )
+            {
+                REQUIRE( proc.isNull() );
+                REQUIRE( QFileInfo::exists( first ) );
+                REQUIRE( QFileInfo::exists( second ) );
+            }
+        }
+    }
+
+    GIVEN( "several sessions whose adb ignores SIGTERM" )
+    {
+        FakeHost host;
+        // sleep inherits the ignored SIGTERM, so only kill ends it.
+        logcat_test::installFakeAdb( host, "trap '' TERM\nprintf 'first\\n'\nexec sleep 30\n" );
+        constexpr int kSessions = 4;
+        QList<AdbProcess*> sessions;
+        for ( int i = 0; i < kSessions; ++i ) {
+            sessions << new AdbProcess( host.settings().findAdb(),
+                                        QString( "emulator-%1" ).arg( 5554 + 2 * i ) );
+            REQUIRE( sessions.last()->start() );
+        }
+        // Each adb has set its trap once it has written its first line.
+        REQUIRE( waitFor( [ &sessions ]() {
+            return std::all_of( sessions.cbegin(), sessions.cend(),
+                                []( const auto* proc ) { return proc->counters().lines > 0; } );
+        } ) );
+        QStringList files;
+        for ( const auto* proc : sessions ) {
+            files << proc->logFilePath();
+        }
+
+        WHEN( "they are ended together" )
+        {
+            QElapsedTimer timer;
+            timer.start();
+            AdbProcess::endAll( sessions );
+            const auto elapsedMs = timer.elapsed();
+            QCoreApplication::sendPostedEvents( nullptr, QEvent::DeferredDelete );
+
+            THEN( "they are waited for once, not one after the other" )
+            {
+                // One after the other, each would take a second before it
+                // is killed: four seconds in all.
+                REQUIRE( elapsedMs < 3000 );
+                REQUIRE( host.logs.filter( "did not exit" ).isEmpty() );
+                REQUIRE( host.logs.filter( "Stopped logcat" ).size() == kSessions );
+            }
+
+            THEN( "every file is kept" )
+            {
+                for ( const auto& file : files ) {
+                    REQUIRE( QFileInfo::exists( file ) );
+                }
+            }
+        }
+    }
+}
+#endif
+
+#ifdef Q_OS_UNIX
 SCENARIO( "destroying a running session does not call back its owner", "[adbprocess]" )
 {
     GIVEN( "a running session with listeners" )
@@ -504,7 +485,7 @@ SCENARIO( "destroying a running session does not call back its owner", "[adbproc
         FakeHost host;
         logcat_test::installFakeAdb( host );
         int signalCount = 0;
-        auto* proc = new AdbProcess( "emulator-5554" );
+        auto* proc = new AdbProcess( host.settings().findAdb(), "emulator-5554" );
         QObject::connect( proc, &AdbProcess::finished, [ &signalCount ]( int ) { ++signalCount; } );
         QObject::connect( proc, &AdbProcess::errorOccurred,
                           [ &signalCount ]( const QString& ) { ++signalCount; } );
@@ -533,7 +514,7 @@ SCENARIO( "adb's stderr reaches the user", "[adbprocess]" )
                                            "printf 'first\\n'\n"
                                            "exec sleep 30\n" );
         QStringList errors;
-        AdbProcess proc( "emulator-5554" );
+        AdbProcess proc( host.settings().findAdb(), "emulator-5554" );
         QObject::connect( &proc, &AdbProcess::errorOccurred,
                           [ &errors ]( const QString& message ) { errors << message; } );
 
@@ -558,7 +539,7 @@ SCENARIO( "adb's stderr reaches the user", "[adbprocess]" )
                                            "exit 1\n" );
         QStringList errors;
         int finishedCount = 0;
-        AdbProcess proc( "emulator-5554" );
+        AdbProcess proc( host.settings().findAdb(), "emulator-5554" );
         QObject::connect( &proc, &AdbProcess::errorOccurred,
                           [ &errors ]( const QString& message ) { errors << message; } );
         QObject::connect( &proc, &AdbProcess::finished,
@@ -592,7 +573,7 @@ SCENARIO( "adb output without a newline is capped in memory", "[adbprocess]" )
         FakeHost host;
         logcat_test::installFakeAdb( host,
                                      xs( AdbProcess::kMaxLineBytes + 1, "" ) + "exec sleep 30\n" );
-        AdbProcess proc( "emulator-5554" );
+        AdbProcess proc( host.settings().findAdb(), "emulator-5554" );
 
         WHEN( "the session runs" )
         {
@@ -600,13 +581,13 @@ SCENARIO( "adb output without a newline is capped in memory", "[adbprocess]" )
 
             THEN( "the cap's worth is written out as a line while adb still runs" )
             {
-                const auto path = proc.tempFilePath();
+                const auto path = proc.logFilePath();
                 REQUIRE( waitFor( [ &path ]() {
                     return readFile( path ).size() == AdbProcess::kMaxLineBytes + 1;
                 } ) );
                 REQUIRE( readFile( path ) == QByteArray( AdbProcess::kMaxLineBytes, 'x' ) + '\n' );
                 REQUIRE( proc.isRunning() );
-                REQUIRE( proc.lineCount() == 1 );
+                REQUIRE( proc.counters().lines == 1 );
             }
         }
     }
@@ -618,7 +599,7 @@ SCENARIO( "adb output without a newline is capped in memory", "[adbprocess]" )
                                      xs( 2 * AdbProcess::kMaxLineBytes, " >&2" ) + "exit 1\n" );
         QStringList errors;
         int finishedCount = 0;
-        AdbProcess proc( "emulator-5554" );
+        AdbProcess proc( host.settings().findAdb(), "emulator-5554" );
         QObject::connect( &proc, &AdbProcess::errorOccurred,
                           [ &errors ]( const QString& message ) { errors << message; } );
         QObject::connect( &proc, &AdbProcess::finished,
@@ -649,29 +630,12 @@ SCENARIO( "adb output without a newline is capped in memory", "[adbprocess]" )
 }
 #endif
 
-SCENARIO( "a typed path is made absolute, and a relative one refused", "[adbprocess]" )
+SCENARIO( "a session with a relative save path does not start", "[adbprocess]" )
 {
-    THEN( "~ is the home directory, and the path is cleaned" )
-    {
-        REQUIRE( AdbProcess::absoluteUserPath( "~" ) == QDir::homePath() );
-        REQUIRE( AdbProcess::absoluteUserPath( " ~/logs/x.log " )
-                 == QDir::homePath() + "/logs/x.log" );
-        const auto root = QDir::rootPath();
-        REQUIRE( AdbProcess::absoluteUserPath( root + "a/../b/c.log" ) == root + "b/c.log" );
-    }
-
-    THEN( "a relative path, or none, is empty" )
-    {
-        REQUIRE( AdbProcess::absoluteUserPath( "out.log" ).isEmpty() );
-        REQUIRE( AdbProcess::absoluteUserPath( "logs/out.log" ).isEmpty() );
-        REQUIRE( AdbProcess::absoluteUserPath( "~user/x.log" ).isEmpty() );
-        REQUIRE( AdbProcess::absoluteUserPath( "  " ).isEmpty() );
-    }
-
     GIVEN( "a session with a relative save path" )
     {
         FakeHost host;
-        AdbProcess proc( "emulator-5554", "relative-capture.log" );
+        AdbProcess proc( host.settings().findAdb(), "emulator-5554", "relative-capture.log" );
         QStringList errors;
         QObject::connect( &proc, &AdbProcess::errorOccurred,
                           [ &errors ]( const QString& message ) { errors << message; } );
@@ -686,89 +650,13 @@ SCENARIO( "a typed path is made absolute, and a relative one refused", "[adbproc
                 REQUIRE( errors.size() == 1 );
                 REQUIRE( errors.first().contains( "not a full path" ) );
                 REQUIRE_FALSE( QFileInfo::exists( "relative-capture.log" ) );
-                REQUIRE( proc.tempFilePath().isEmpty() );
+                REQUIRE( proc.logFilePath().isEmpty() );
             }
         }
     }
 }
 
 #ifdef Q_OS_UNIX
-SCENARIO( "only a regular file is opened as the save path", "[adbprocess]" )
-{
-    GIVEN( "a save path that is a FIFO" )
-    {
-        FakeHost host;
-        logcat_test::installFakeAdb( host );
-        QTemporaryDir logDir;
-        const auto fifo = logDir.filePath( "capture.log" );
-        REQUIRE( ::mkfifo( QFile::encodeName( fifo ).constData(), 0600 ) == 0 );
-        AdbProcess proc( "emulator-5554", fifo );
-        QStringList errors;
-        QObject::connect( &proc, &AdbProcess::errorOccurred,
-                          [ &errors ]( const QString& message ) { errors << message; } );
-
-        WHEN( "it is started" )
-        {
-            QElapsedTimer timer;
-            timer.start();
-            const auto started = proc.start();
-
-            THEN( "it is refused at once, without waiting for a reader" )
-            {
-                REQUIRE_FALSE( started );
-                REQUIRE( timer.elapsed() < 2000 );
-                REQUIRE( errors.size() == 1 );
-                REQUIRE( errors.first().contains( "not a regular file" ) );
-            }
-        }
-    }
-
-    GIVEN( "a save path that is a symlink to a file that does not exist" )
-    {
-        FakeHost host;
-        logcat_test::installFakeAdb( host );
-        QTemporaryDir logDir;
-        const auto target = logDir.filePath( "elsewhere.log" );
-        const auto link = logDir.filePath( "capture.log" );
-        REQUIRE( QFile::link( target, link ) );
-        AdbProcess proc( "emulator-5554", link );
-
-        WHEN( "it is started" )
-        {
-            const auto started = proc.start();
-
-            THEN( "it is refused, and the link's target is not created" )
-            {
-                REQUIRE_FALSE( started );
-                REQUIRE_FALSE( QFileInfo::exists( target ) );
-            }
-        }
-    }
-
-    GIVEN( "a save path that does not exist yet" )
-    {
-        FakeHost host;
-        logcat_test::installFakeAdb( host );
-        QTemporaryDir logDir;
-        const auto savePath = logDir.filePath( "capture.log" );
-        AdbProcess proc( "emulator-5554", savePath );
-
-        WHEN( "it is started" )
-        {
-            REQUIRE( proc.start() );
-
-            THEN( "the file it creates is readable by the user only" )
-            {
-                struct stat info{};
-                REQUIRE( ::stat( QFile::encodeName( savePath ).constData(), &info ) == 0 );
-                REQUIRE( ( info.st_mode & 0777 ) == 0600 );
-            }
-
-            proc.stop();
-        }
-    }
-}
-
 SCENARIO( "a log file that cannot be written stops the session and says why", "[adbprocess]" )
 {
     GIVEN( "a session whose log file may grow by a few bytes only" )
@@ -777,7 +665,7 @@ SCENARIO( "a log file that cannot be written stops the session and says why", "[
         logcat_test::installFakeAdb( host );
         QTemporaryDir logDir;
         const auto savePath = logDir.filePath( "capture.log" );
-        AdbProcess proc( "emulator-5554", savePath );
+        AdbProcess proc( host.settings().findAdb(), "emulator-5554", savePath );
         QStringList errors;
         QObject::connect( &proc, &AdbProcess::errorOccurred,
                           [ &errors ]( const QString& message ) { errors << message; } );

@@ -322,6 +322,8 @@ classDiagram
     class PluginState {
         +LogSquirlHostApi* api
         +void* handle
+        +Settings* settings
+        +DeviceScan* scan
         +Sessions* sessions
         +DeviceStore* store
         +DeviceWidget* dialog
@@ -329,12 +331,31 @@ classDiagram
         +bool initialised
     }
 
-    class Sessions {
-        -map~QString, AdbProcess*~ sessions_
-        -QProcess* scanProcess_
+    class DeviceScan {
+        -AdbDevicesRunner* runner_
         +devices() QStringList
         +attachedDevices() QList~Device~
-        +refreshDevices()
+        +isScanning() bool
+        +refresh()
+        +restart()
+        devicesChanged()
+        scanningChanged()
+    }
+
+    class AdbDevicesRunner {
+        <<port>>
+        +start(adb)
+        +abandon()
+        listed(output)
+        failed(message)
+    }
+
+    class QProcessAdbDevices {
+        -QProcess* process_
+    }
+
+    class Sessions {
+        -map~QString, AdbProcess*~ sessions_
         +startSession(serial, savePath) bool
         +stopSession(serial)
         +rotateSession(serial)
@@ -343,12 +364,15 @@ classDiagram
         sessionStarted(serial)
         sessionStopped(serial)
         sessionChanged(serial)
+        sessionEnded(serial)
     }
 
     class DeviceWidget {
         -QComboBox* deviceCombo_
         -QPushButton* startButton_
         -QPushButton* stopButton_
+        -Settings* settings_
+        -DeviceScan* scan_
         -Sessions* sessions_
         -startCapture()
         -stopCapture()
@@ -358,8 +382,11 @@ classDiagram
         -QHash~QString, DeviceTile*~ tileBySerial_
         -QTimer* scanTimer_
         -QTimer* pollTimer_
+        -Settings* settings_
+        -DeviceScan* scan_
         -Sessions* sessions_
         -DeviceStore* store_
+        -QHash~QString, CounterSample~ samples_
         +reload()
         +pollCounters()
     }
@@ -382,9 +409,17 @@ classDiagram
         +remember(attached)
         +forget(serial)
         +setSavePath(serial, path)
-        +logDir() QString
-        +savePathFor(serial) QString
+        +savePathFor(serial, logDir) QString
         changed()
+    }
+
+    class Settings {
+        +findAdb() QString
+        +adbPathOverride() QString
+        +setAdbPathOverride(path) bool
+        +logDir() QString
+        +setLogDir(dir)
+        adbPathChanged()
     }
 
     class SettingsDialog {
@@ -394,29 +429,54 @@ classDiagram
     }
 
     class AdbProcess {
+        -QString adb_
         -QString serial_
         -QProcess process_
-        -QTemporaryDir tempDir_
-        -QFile tempFile_
+        -LogFile logFile_
+        -SessionCounters counters_
         +start()
         +stop()
-        +preserveTempFile()
-        +tempFilePath() QString
+        +rotateLog() QString
+        +end()
+        +endAll(QList~AdbProcess*~)$
+        +logFilePath() QString
+        +counters() SessionCounters
         +parseDevices(QByteArray)$ QList~Device~
         +parseDeviceList(QByteArray)$ QStringList
-        +findAdb()$ QString
     }
 
+    class LogFile {
+        -QTemporaryDir tempDir_
+        -QFile file_
+        +open(QString&) bool
+        +writeLine(QByteArray) bool
+        +rotate(QString&) Rotation
+        +keepTempDir() QString
+        +path() QString
+        +generateLogPath(QString, QString)$ QString
+    }
+
+    PluginState --> Settings : settings
+    PluginState --> DeviceScan : scan
     PluginState --> Sessions : sessions
     PluginState --> DeviceStore : store
     PluginState --> DeviceWidget : dialog
     PluginState --> SidebarWidget : sidebarWidget
+    DeviceScan --> Settings : findAdb(), restarts on adbPathChanged()
+    Sessions --> Settings : findAdb()
+    SettingsDialog --> Settings : sets
+    DeviceWidget --> Settings : sets the ADB path
+    DeviceScan --> AdbDevicesRunner : runs adb devices -l
+    AdbDevicesRunner <|-- QProcessAdbDevices
+    DeviceWidget --> DeviceScan : view of
     DeviceWidget --> Sessions : view of
+    SidebarWidget --> DeviceScan : view of
     SidebarWidget --> Sessions : view of
     SidebarWidget --> DeviceStore : view of
     SidebarWidget --> DeviceTile : one per device
     SidebarWidget --> SettingsDialog : Settings…
     Sessions --> AdbProcess : sessions_ (0..N)
+    AdbProcess --> LogFile : writes through
 ```
 
 ### The sidebar tab: one tile per device
@@ -426,7 +486,7 @@ device — the card of LogSquirl-NATS's connection tiles, except that a tile
 stands for a device, not for a saved configuration:
 
 - **Which devices.** Every device `adb devices -l` lists, in any state
-  (`Sessions::attachedDevices()`, parsed by `AdbProcess::parseDevices()`),
+  (`DeviceScan::attachedDevices()`, parsed by `AdbProcess::parseDevices()`),
   and every device seen before (`DeviceStore`, the array `devices` in
   `logcat.ini`), first seen first. While it is shown, the tab rescans every
   `SidebarWidget::kScanIntervalMs` (3 s), so a device plugged in or unplugged
@@ -441,7 +501,7 @@ stands for a device, not for a saved configuration:
   tile is greyed out, with **Forget**.
 - **What it does.** **Start** (only while connected) runs logcat into the
   device's own save path or a new file in the log directory
-  (`DeviceStore::savePathFor()`), **Stop** ends it, **↻ Rotate** (while it
+  (`DeviceStore::savePathFor()`, `Settings::logDir()`), **Stop** ends it, **↻ Rotate** (while it
   runs) goes on in a new file and tab, **Save to…** sets the device's own save
   path. **Settings…** in the tab opens `SettingsDialog`: the log directory and
   the ADB path.
@@ -579,8 +639,9 @@ Use lowercase `logsquirl` in paths (matching QStandardPaths resolution):
 ### ADB paths
 
 On Windows, the ADB executable is `adb.exe`.  Use `QStandardPaths` or
-let `QProcess` handle the extension. The plugin checks well-known platform
-paths as a fallback (e.g. `/opt/homebrew/bin/adb` on macOS).
+let `QProcess` handle the extension. `Settings::findAdb()` (`src/settings.h`)
+checks well-known platform paths as a fallback (e.g. `/opt/homebrew/bin/adb`
+on macOS).
 
 ### Temp files
 

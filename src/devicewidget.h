@@ -22,8 +22,8 @@
  * @brief Non-modal QDialog for ADB device selection and logcat session control.
  *
  * The DeviceWidget is opened from the Plugins → Android Logcat menu entry.
- * It is a view of the plugin's Sessions (sessions.h), which owns the device
- * scan and the logcat sessions.  It provides:
+ * It is a view of the plugin's DeviceScan (devicescan.h), the devices, and
+ * of its Sessions (sessions.h), the logcat sessions.  It provides:
  *
  *   - A combo box listing discovered ADB devices
  *   - A "Refresh" button to re-scan for devices (in the background)
@@ -37,7 +37,7 @@
  * OWNERSHIP
  * ─────────
  * The dialog is created by logsquirl_plugin_init() and deleted by
- * logsquirl_plugin_shutdown(), before the Sessions it shows.
+ * logsquirl_plugin_shutdown(), before the scan and the Sessions it shows.
  */
 
 #pragma once
@@ -51,7 +51,9 @@
 
 namespace logcat {
 
+class DeviceScan;
 class Sessions;
+class Settings;
 
 /**
  * Non-modal dialog for managing ADB logcat sessions.
@@ -64,15 +66,21 @@ class DeviceWidget : public QDialog {
 
 public:
     /**
-     * @param sessions  The devices and sessions the dialog shows.  Must
+     * @param settings  The ADB path the dialog shows and sets.  Must
      *                  outlive the dialog.
+     * @param scan      The devices the dialog shows.  Must outlive the
+     *                  dialog.
+     * @param sessions  The sessions the dialog shows.  Must outlive the
+     *                  dialog.
      * @param parent    QWidget parent.
      */
-    explicit DeviceWidget( Sessions* sessions, QWidget* parent = nullptr );
+    DeviceWidget( Settings* settings, DeviceScan* scan, Sessions* sessions,
+                  QWidget* parent = nullptr );
 
     /**
      * Ask for the ADB executable path (Configure button, and Plugins →
-     * Configure), save it, and rescan the devices with it.
+     * Configure) and save it in the settings, which has the devices
+     * rescanned with it (Settings::adbPathChanged()).
      *
      * @param parent  Parent of the input dialog.
      */
@@ -104,6 +112,8 @@ private:
     /** Return the serial of the currently selected device, or empty string. */
     QString currentSerial() const;
 
+    Settings* settings_ = nullptr;
+    DeviceScan* scan_ = nullptr;
     Sessions* sessions_ = nullptr;
 
     // ── UI elements ──────────────────────────────────────────────────

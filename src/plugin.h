@@ -45,9 +45,12 @@
 #include <utility>
 
 namespace logcat {
+class AdbDevicesRunner;
+class DeviceScan;
 class DeviceStore;
 class DeviceWidget;
 class Sessions;
+class Settings;
 class SidebarWidget;
 } // namespace logcat
 
@@ -63,10 +66,12 @@ namespace logcat {
 struct PluginState {
     const LogSquirlHostApi* api = nullptr;  ///< Host API function table.
     void* handle = nullptr;                 ///< Opaque plugin instance handle.
-    Sessions* sessions = nullptr;           ///< The devices and their logcat sessions.
-    DeviceStore* store = nullptr;           ///< The devices seen before, and the log directory.
-    DeviceWidget* dialog = nullptr;         ///< Logcat session dialog, a view of sessions.
-    SidebarWidget* sidebarWidget = nullptr; ///< Sidebar tab, a view of sessions and store.
+    Settings* settings = nullptr;           ///< logcat.ini: the adb, and the log directory.
+    DeviceScan* scan = nullptr;             ///< The devices adb lists.
+    Sessions* sessions = nullptr;           ///< The logcat session of each device.
+    DeviceStore* store = nullptr;           ///< The devices seen before.
+    DeviceWidget* dialog = nullptr;         ///< Logcat session dialog, a view of scan and sessions.
+    SidebarWidget* sidebarWidget = nullptr; ///< Sidebar tab, a view of scan, sessions and store.
     bool sidebarTabRegistered = false;      ///< The host holds sidebarWidget as a tab.
     /// The size of the host's table (init_ex()): a function added after
     /// LogSquirl 26.10 may be used only if LOGSQUIRL_HOST_API_HAS( hostApiSize,
@@ -75,6 +80,9 @@ struct PluginState {
     bool initialised = false; ///< True between init() and shutdown().
     bool quitting = false; ///< LogSquirl is quitting (aboutToQuit), not just unloading the plugin.
     QString tempRoot;      ///< Where temporary directories go; empty: the system's (for tests).
+    /// For tests: the runner that the next init() gives its DeviceScan, which
+    /// takes it (and init() clears this); null: adb runs in a QProcess.
+    AdbDevicesRunner* devicesRunner = nullptr;
 };
 
 /// Singleton plugin state.  Defined in plugin.cpp.

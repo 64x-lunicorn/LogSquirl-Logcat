@@ -19,16 +19,19 @@
 
 /**
  * @file devicewidget_test.cpp
- * @brief BDD tests for the dialog, a view of Sessions.
+ * @brief BDD tests for the dialog, a view of the device scan and Sessions.
  *
- * The dialog is driven through its widgets and through the Sessions
- * it shows, with a FakeHost and a stand-in for adb (see fakeadb.h).
+ * The dialog is driven through its widgets and through the scan and the
+ * Sessions it shows, with a FakeHost, a scan that the test completes
+ * (fakeadbdevices.h) and a stand-in for adb (see fakeadb.h).
  */
 
 #include <catch2/catch.hpp>
 
+#include "devicescan.h"
 #include "devicewidget.h"
 #include "fakeadb.h"
+#include "fakeadbdevices.h"
 #include "sessions.h"
 
 #include <QFile>
@@ -37,10 +40,11 @@
 
 #include <array>
 
+using logcat::DeviceScan;
 using logcat::DeviceWidget;
 using logcat::Sessions;
+using logcat_test::FakeAdbDevices;
 using logcat_test::FakeHost;
-using logcat_test::waitFor;
 
 namespace {
 
@@ -100,18 +104,18 @@ SCENARIO( "the dialog's Refresh button shows a running device scan", "[devicewid
     GIVEN( "a dialog whose device scan is running" )
     {
         FakeHost host;
-        logcat_test::installFakeAdb(
-            host, "exec sleep 30\n",
-            "sleep 1\nprintf 'List of devices attached\\nemulator-5554\\tdevice\\n\\n'\n" );
-        Sessions sessions;
-        const DeviceWidget widget( &sessions );
+        logcat_test::installBrokenAdb( host ); // only its path is used
+        auto* runner = new FakeAdbDevices;
+        DeviceScan scan( &host.settings(), runner );
+        Sessions sessions( &host.settings() );
+        const DeviceWidget widget( &host.settings(), &scan, &sessions );
         auto* refresh = widget.findChild<QPushButton*>( "refresh" );
         REQUIRE( refresh != nullptr );
 
         THEN( "the Refresh button shows that it is scanning until the scan ends" )
         {
             REQUIRE_FALSE( refresh->isEnabled() );
-            REQUIRE( waitFor( [ &sessions ]() { return !sessions.devices().isEmpty(); } ) );
+            runner->listOne( "emulator-5554" );
             REQUIRE( refresh->isEnabled() );
         }
     }
@@ -119,22 +123,23 @@ SCENARIO( "the dialog's Refresh button shows a running device scan", "[devicewid
     GIVEN( "a dialog whose device scan hangs" )
     {
         FakeHost host;
-        logcat_test::installFakeAdb( host, "exec sleep 30\n", "exec sleep 30\n" );
-        Sessions sessions;
-        const DeviceWidget widget( &sessions );
+        logcat_test::installBrokenAdb( host );
+        auto* runner = new FakeAdbDevices;
+        DeviceScan scan( &host.settings(), runner );
+        Sessions sessions( &host.settings() );
+        const DeviceWidget widget( &host.settings(), &scan, &sessions );
 
-        WHEN( "the ADB path changes to one where no adb can be found" )
+        WHEN( "the ADB path changes to one where no adb can be found, which restarts the scan" )
         {
             const NoAdbAnywhere noAdb;
-            logcat_test::useAdb( host, host.configDir() + "/missing-adb" );
-            if ( !logcat::AdbProcess::findAdb().isEmpty() ) {
-                WARN( "An adb is installed in a well-known location; skipped." );
-                return;
-            }
             auto* refresh = widget.findChild<QPushButton*>( "refresh" );
             REQUIRE( refresh != nullptr );
             REQUIRE_FALSE( refresh->isEnabled() );
-            sessions.restartDeviceScan();
+            logcat_test::useAdb( host, host.configDir() + "/missing-adb" );
+            if ( !host.settings().findAdb().isEmpty() ) {
+                WARN( "An adb is installed in a well-known location; skipped." );
+                return;
+            }
 
             THEN( "the Refresh button is usable again" )
             {
@@ -163,8 +168,9 @@ SCENARIO( "an adb path is shown as plain text", "[devicewidget]" )
 
         WHEN( "the dialog shows it" )
         {
-            Sessions sessions;
-            const DeviceWidget widget( &sessions );
+            DeviceScan scan( &host.settings(), new FakeAdbDevices );
+            Sessions sessions( &host.settings() );
+            const DeviceWidget widget( &host.settings(), &scan, &sessions );
 
             THEN( "it is shown as its literal text" )
             {

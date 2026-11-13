@@ -22,8 +22,9 @@
  * @brief ADB device discovery and per-device logcat process management.
  *
  * Each AdbProcess instance wraps a single `adb -s <serial> logcat` process.
- * Output is written to a temporary file (and optionally a user-chosen file)
- * so that LogSquirl can open it with follow/tail mode via the host API.
+ * Its output is written, line by line, to the Session's log file (logfile.h):
+ * a temporary file or a user-chosen one, which LogSquirl opens with
+ * follow/tail mode via the host API.
  *
  * THREAD MODEL
  * ────────────
@@ -33,21 +34,21 @@
  *
  * USAGE
  * ─────
- *   auto* proc = new AdbProcess( "SERIAL123", "/optional/save.log", parent );
+ *   auto* proc = new AdbProcess( settings.findAdb(), "SERIAL123", "/optional/save.log", parent );
  *   if ( proc->start() )              // launches `adb -s SERIAL123 logcat`
- *       qDebug() << proc->tempFilePath(); // LogSquirl opens this file
+ *       qDebug() << proc->logFilePath(); // LogSquirl opens this file
  *   proc->stop();                     // ends adb, waits for exit
  */
 
 #pragma once
 
+#include "logfile.h"
+
 #include <QDateTime>
-#include <QFile>
 #include <QObject>
 #include <QProcess>
 #include <QString>
 #include <QStringList>
-#include <QTemporaryDir>
 
 #include <limits>
 
@@ -95,15 +96,11 @@ struct Device {
 /**
  * Manages a single `adb logcat` process for one device.
  *
- * Captures stdout line-by-line and writes each line to:
- *   - The user-configured log directory file, when savePath is non-empty.
- *   - A temporary file inside a QTemporaryDir, when savePath is empty,
- *     named after the process (see tempdirs.h).
+ * Captures stdout line-by-line and writes each line to the Session's
+ * LogFile: the save path, when savePath is non-empty, or else a temporary
+ * file in a directory named after the process (see tempdirs.h).
  *
- * When a savePath is provided the temporary directory is not used,
- * avoiding orphaned temp files that fill up disk space.
- *
- * The file path returned by tempFilePath() is what the host opens
+ * The file path returned by logFilePath() is what the host opens
  * via open_file().
  */
 class AdbProcess : public QObject {
@@ -113,39 +110,20 @@ public:
     /**
      * Construct a logcat session for one device.
      *
+     * @param adb       The adb executable to run (Settings::findAdb()); empty
+     *                  if there is none, which start() reports.
      * @param serial    ADB device serial (from `adb devices`).
      * @param savePath  Optional path to a .log file for persistent saving.
      *                  Pass an empty string to disable saving.
      * @param parent    QObject parent for memory management.
      */
-    explicit AdbProcess( const QString& serial, const QString& savePath = {},
-                         QObject* parent = nullptr );
+    AdbProcess( const QString& adb, const QString& serial, const QString& savePath = {},
+                QObject* parent = nullptr );
 
     /** Stops the process without emitting any signal. */
     ~AdbProcess() override;
 
     // ── Static helpers ───────────────────────────────────────────────
-
-    /**
-     * Auto-detect the ADB executable path.
-     *
-     * Search order:
-     *   1. User override from plugin config (logcat.ini → adb/path)
-     *   2. ANDROID_HOME/platform-tools/adb
-     *   3. ANDROID_SDK_ROOT/platform-tools/adb  (legacy env var)
-     *   4. System PATH lookup
-     *
-     * @return Absolute path to `adb`, or empty string if not found.
-     */
-    static QString findAdb();
-
-    /// The ADB path the user set (logcat.ini → adb/path); empty for
-    /// auto-detection, and without a config directory.
-    static QString adbPathOverride();
-
-    /// Save @p path as the ADB path; empty for auto-detection.  False if
-    /// there is no config directory to save it in.
-    static bool setAdbPathOverride( const QString& path );
 
     /**
      * Parse the raw output of `adb devices` into a list of device serials.
@@ -191,41 +169,6 @@ public:
     static QList<QByteArray>
     takeLines( QByteArray& buffer, qsizetype maxLineBytes = std::numeric_limits<qsizetype>::max() );
 
-    /**
-     * Return a path for a new log file in @p dir, named
-     * `<yyyy-MM-dd_HHmmss>_<serial>.log`.  Characters of the serial that
-     * are not valid in file names (the ':' of a wireless device's
-     * "192.168.1.5:5555") are replaced by '_'.  If that file exists, a
-     * number is appended (`…_2.log`, `…_3.log`, …), so that two captures
-     * within the same second never share a file.
-     *
-     * @param dir        Directory the file will be created in.
-     * @param serial     ADB device serial.
-     * @param timestamp  Time the capture starts.
-     * @return Absolute path of a file that does not exist yet.
-     */
-    static QString generateLogPath( const QString& dir, const QString& serial,
-                                    const QDateTime& timestamp = QDateTime::currentDateTime() );
-
-    /**
-     * Return the plugin's config directory from the host API.  Empty while
-     * the plugin is not initialised: callers then use no configuration.
-     */
-    static QString configDir();
-
-    /// The plugin's settings file, logcat.ini in configDir() (the ADB path,
-    /// and devicestore.h); empty without a config directory.
-    static QString settingsFile();
-
-    /**
-     * The path a user typed, made absolute: a leading `~` is the home
-     * directory, and the path is cleaned.  Empty for a path that is still
-     * relative, as `open_file()` takes absolute paths only and LogSquirl's
-     * working directory is nothing the user chose (`/` when started from
-     * the Finder or the Dock).
-     */
-    static QString absoluteUserPath( const QString& path );
-
     /// How long start() waits for adb to launch before giving up.
     static constexpr int kStartTimeoutMs = 5000;
 
@@ -262,34 +205,36 @@ public:
     void stop();
 
     /**
-     * Stop the logcat processes of @p sessions together, as stop() does
-     * one: every adb is told to end before any is waited for, and all are
-     * waited for against one shared deadline, so that stopping many takes
-     * no longer than stopping one - at most two seconds.
-     */
-    static void stopAll( const QList<AdbProcess*>& sessions );
-
-    /**
-     * Prevent the temporary log file from being deleted when this
-     * object is destroyed.  Call before deleteLater() so that the
-     * LogSquirl tab can keep displaying the captured output.
+     * End the session, however it ends (Stop, Stop All, adb exiting on its
+     * own): its signals are cut first, so that stopping it calls back
+     * no-one; then adb is stopped as stop() does; its files are kept for
+     * their tabs (LogFile::keepTempDir(): the plugin removes the temporary
+     * ones when LogSquirl quits, tempdirs.h); and it is deleted later.
      *
-     * @return The temporary directory left on disk, or empty when the
-     *         session writes to a save path (nothing to preserve).
+     * Nothing but its counters() and logFilePath() may be read afterwards,
+     * and only until control returns to the event loop.
      */
-    QString preserveTempFile();
+    void end();
 
     /**
-     * Rotate the log file: close the current temp file and open a new
-     * one in the same temp directory.  The old file is preserved so the
-     * existing LogSquirl tab keeps its content.  New logcat output is
-     * redirected to the new file.
+     * End each of @p sessions as end() does, together: every adb is told
+     * to end before any is waited for, and all are waited for against one
+     * shared deadline, so that ending many takes no longer than ending
+     * one - at most two seconds.
+     */
+    static void endAll( const QList<AdbProcess*>& sessions );
+
+    /**
+     * Rotate the log file (LogFile::rotate()): close the current file and
+     * open a new one next to it.  The old file stays on disk, and end()
+     * keeps it, so the existing LogSquirl tab keeps its content.  New
+     * logcat output is redirected to the new file.
      *
      * If the new file cannot be created, errorOccurred() is emitted and
      * the capture continues in the old file; if that cannot be reopened
      * either, the session is stopped (finished() is emitted).
      *
-     * @return Absolute path to the new temp file, or empty on failure.
+     * @return Absolute path to the new file, or empty on failure.
      */
     QString rotateLog();
 
@@ -303,28 +248,19 @@ public:
     }
 
     /**
-     * Absolute path to the log file (save path or temp file).
-     *
-     * Returns the user-configured save path when one was provided,
-     * otherwise the temporary file path.  This is the file that will
-     * be opened in LogSquirl via host->open_file().  It is only valid
-     * after start() is called.
+     * Absolute path to the file the session writes now: the save path
+     * (as expanded, ~ for the home directory) or the temporary file, or
+     * after a Rotate the file it moved to.  This is the file that will be
+     * opened in LogSquirl via host->open_file().  Empty before start(),
+     * and after a start() that failed.
      */
-    QString tempFilePath() const;
-
-    /** Whether the session writes directly to a user-specified save path. */
-    bool isUsingSavePath() const
+    QString logFilePath() const
     {
-        return usingSavePath_;
+        return logFile_.path();
     }
 
-    /** Number of lines in the current file: it starts from 0 on each rotation. */
-    qint64 lineCount() const
-    {
-        return lineCount_;
-    }
-
-    /** What the session has captured since start(), read live. */
+    /** What the session has captured since start(), read live: counters().lines
+     *  counts the lines of the whole session, over every file. */
     SessionCounters counters() const
     {
         return counters_;
@@ -359,6 +295,12 @@ private Q_SLOTS:
 
 private:
     /**
+     * Stop the logcat processes of @p sessions together, as stop() does
+     * one, against one shared deadline (see endAll()).
+     */
+    static void stopAll( const QList<AdbProcess*>& sessions );
+
+    /**
      * End the adb of every one of @p sessions: SIGTERM on Unix, kill on
      * Windows, then kill those left after a second.  Waits at most two
      * seconds for all of them together; the exits are not reported as
@@ -369,46 +311,31 @@ private:
     /// How long endProcesses() waits after it signals the processes, each time.
     static constexpr int kStopStepMs = 1000;
 
-    /// Write @p line and a newline; false, after failWrite(), if the log
-    /// file cannot be written.
+    /// Write @p line and a newline to the log file and count it; false if
+    /// it cannot be written (see failWrite()).
     bool writeLine( const QByteArray& line );
-    /// Flush the log file; false, after failWrite(), if it cannot be written.
+    /// Flush the log file; false if it cannot be written (see failWrite()).
     bool flushLogFile();
     /// The log file cannot be written (disk full, volume gone): say so once
     /// and stop the session, rather than drop every line from here on.
     void failWrite();
-    /// Open @p path for the capture with @p mode, refusing anything that is
-    /// not a regular file: a FIFO would block the UI thread, a symlink lead
-    /// elsewhere.  A file it creates is readable by the user only.  False,
-    /// with the reason in tempFile_.errorString() or @p error.
-    bool openLogFile( const QString& path, QIODevice::OpenMode mode, QString& error );
 
     /** Write out a buffered partial line, e.g. before the file is closed. */
     void flushPartialLine();
 
-    /** Close the log file after a failed start; remove it if start() created it. */
-    void discardLogFile();
-
+    QString adb_; ///< The adb executable; empty if there is none.
     QString serial_;
-    QString savePath_;
 
     /// adb.  A child of this object - unless it outlives it: see ~AdbProcess().
     QProcess* process_;
-    QTemporaryDir tempDir_;
-    QFile tempFile_;
-    /// The log file open in tempFile_, which an open by descriptor leaves
-    /// without a name; empty while none is.
-    QString logPath_;
+    LogFile logFile_;         ///< Where adb's output goes.
     QByteArray readBuffer_;   ///< Accumulates partial lines from stdout.
     QByteArray stderrBuffer_; ///< Accumulates partial lines from stderr, cut at kMaxLineBytes.
     QString lastStderrLine_;  ///< Last line adb wrote to stderr.
-    qint64 lineCount_ = 0;
-    SessionCounters counters_;    ///< Since start(); counters_.rotations counts rotateLog().
-    int rotationCount_ = 0;       ///< Incremented on each rotateLog() call; names the files.
-    bool usingSavePath_ = false;  ///< True when writing directly to the log directory.
-    bool createdLogFile_ = false; ///< True when start() created the log file.
-    bool stopping_ = false;       ///< True while stop() ends the process.
-    bool writeFailed_ = false;    ///< The log file could not be written; the session stops.
+    /// Since start(), over every file of the session; counters_.rotations
+    /// counts rotateLog().
+    SessionCounters counters_;
+    bool stopping_ = false; ///< True while stop() ends the process.
 };
 
 } // namespace logcat

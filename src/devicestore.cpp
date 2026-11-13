@@ -23,9 +23,9 @@
  */
 
 #include "devicestore.h"
+#include "logfile.h"
 
 #include <QDir>
-#include <QFileInfo>
 #include <QSettings>
 
 #include <algorithm>
@@ -35,7 +35,6 @@ namespace logcat {
 namespace {
 
 constexpr auto kDevices = "devices";
-constexpr auto kLogDir = "logcat/logDir";
 
 } // namespace
 
@@ -130,49 +129,27 @@ void DeviceStore::setSavePath( const QString& serial, const QString& path )
     }
 }
 
-QString DeviceStore::logDir() const
-{
-    if ( settingsFile_.isEmpty() ) {
-        return {};
-    }
-    const QSettings settings( settingsFile_, QSettings::IniFormat );
-    return settings.value( kLogDir ).toString();
-}
-
-void DeviceStore::setLogDir( const QString& dir )
-{
-    if ( settingsFile_.isEmpty() ) {
-        return;
-    }
-    QSettings settings( settingsFile_, QSettings::IniFormat );
-    settings.setValue( kLogDir, dir.trimmed() );
-}
-
-QString DeviceStore::savePathFor( const QString& serial ) const
+QString DeviceStore::savePathFor( const QString& serial, const QString& logDir ) const
 {
     if ( const auto known = find( serial ); known && !known->savePath.isEmpty() ) {
         return known->savePath;
     }
 
-    auto dir = logDir().trimmed();
+    auto dir = logDir.trimmed();
     if ( dir.isEmpty() ) {
-        // Default to logs/ beside the settings, so that captures are kept.
-        if ( settingsFile_.isEmpty() ) {
-            return {};
-        }
-        dir = QFileInfo( settingsFile_ ).absolutePath() + "/logs";
+        return {};
     }
 
     // Ensure the directory exists.  A relative one is left as it is:
     // AdbProcess::start() refuses it with a message, rather than create it
     // in LogSquirl's working directory.
-    if ( const auto absolute = AdbProcess::absoluteUserPath( dir ); !absolute.isEmpty() ) {
+    if ( const auto absolute = LogFile::absoluteUserPath( dir ); !absolute.isEmpty() ) {
         dir = absolute;
         QDir().mkpath( dir );
     }
 
     // Format: YYYY-MM-dd_HHmmss_<serial>.log
-    return AdbProcess::generateLogPath( dir, serial );
+    return LogFile::generateLogPath( dir, serial );
 }
 
 void DeviceStore::write( const QList<KnownDevice>& devices )

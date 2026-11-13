@@ -19,7 +19,7 @@
 
 /**
  * @file sessions.cpp
- * @brief Implementation of Sessions: the devices, and the logcat session of each.
+ * @brief Implementation of Sessions: the logcat session of each device.
  *
  * Sessions keeps a map of serial → AdbProcess*.  startSession():
  *
@@ -30,21 +30,20 @@
  *      follow=true, which opens a new tail-mode tab in LogSquirl.
  *   5. The session is stored in sessions_, and sessionStarted() emitted.
  *
- * stopSession():
- *   1. AdbProcess::stop() terminates the child process.
- *   2. The session is removed from sessions_, and sessionStopped() emitted.
- *   3. The LogSquirl tab remains open (the user can close it manually).
+ * stopSession(), stopAll() and adb exiting on its own:
+ *   1. The session is removed from sessions_.
+ *   2. AdbProcess::end() (or endAll()) cuts its signals, stops adb, keeps
+ *      its files for their tabs and deletes it later.
+ *   3. sessionStopped() is emitted.  The LogSquirl tab remains open (the
+ *      user can close it manually).
  */
 
 #include "sessions.h"
 #include "plugin.h"
+#include "settings.h"
 
 #include <QDir>
 #include <QFileInfo>
-#include <QSignalBlocker>
-#include <QTimer>
-
-#include <algorithm>
 
 namespace logcat {
 
@@ -86,166 +85,10 @@ void openFollowed( const QString& path )
 
 // ── Construction ────────────────────────────────────────────────────────
 
-Sessions::Sessions( QObject* parent )
+Sessions::Sessions( const Settings* settings, QObject* parent )
     : QObject( parent )
+    , settings_( settings )
 {
-    scanProcess_ = new QProcess( this );
-    // Each handler runs through guarded(): an exception must not unwind
-    // through Qt's event loop into the host.
-    connect( scanProcess_, &QProcess::finished, this,
-             [ this ]( int exitCode, QProcess::ExitStatus exitStatus ) {
-                 guarded( "reading the device list", [ this, exitCode, exitStatus ] {
-                     onScanFinished( exitCode, exitStatus );
-                 } );
-             } );
-    connect( scanProcess_, &QProcess::errorOccurred, this,
-             [ this ]( QProcess::ProcessError error ) {
-                 guarded( "reporting a device scan error", [ this, error ] {
-                     // No finished() follows a failed start
-                     if ( error == QProcess::FailedToStart ) {
-                         scanTimeout_->stop();
-                         onScanFailed( "adb devices could not be started: "
-                                       + scanProcess_->errorString() );
-                         setDevices( {} );
-                         onScanEnded();
-                     }
-                 } );
-             } );
-
-    // The first scan may need to start the ADB server, which can take
-    // several seconds; give up after 10.
-    scanTimeout_ = new QTimer( this );
-    scanTimeout_->setSingleShot( true );
-    scanTimeout_->setInterval( 10000 );
-    connect( scanTimeout_, &QTimer::timeout, this, [ this ]() {
-        guarded( "ending a device scan that timed out", [ this ] {
-            onScanFailed( "adb devices timed out." );
-            scanProcess_->kill();
-        } );
-    } );
-
-    refreshDevices();
-}
-
-Sessions::~Sessions()
-{
-    // The scan must not report into a half-destroyed object, and a scan
-    // that is still running is killed and reaped here rather than left
-    // to ~QProcess, which only warns and waits for it.
-    scanProcess_->disconnect( this );
-    if ( scanProcess_->state() != QProcess::NotRunning ) {
-        scanProcess_->kill();
-        scanProcess_->waitForFinished( 1000 );
-    }
-}
-
-// ── Devices ─────────────────────────────────────────────────────────────
-
-bool Sessions::isScanning() const
-{
-    return scanProcess_->state() != QProcess::NotRunning;
-}
-
-void Sessions::refreshDevices()
-{
-    if ( isScanning() ) {
-        rescanPending_ = true;
-        return;
-    }
-
-    const auto adb = AdbProcess::findAdb();
-    if ( adb.isEmpty() ) {
-        onScanFailed( "adb not found — cannot discover devices." );
-        setDevices( {} );
-        // A scan that ended just before may have left a view showing "Scanning…"
-        Q_EMIT scanningChanged();
-        return;
-    }
-
-    scanProcess_->setProgram( adb );
-    // -l: also the model of each device
-    scanProcess_->setArguments( { "devices", "-l" } );
-    // Arm the timeout first: on Windows a failed start is reported from
-    // inside start(), and that handler stops the timeout.
-    scanTimeout_->start();
-    scanProcess_->start();
-    Q_EMIT scanningChanged();
-}
-
-void Sessions::restartDeviceScan()
-{
-    if ( isScanning() ) {
-        // Its result is not wanted, not even as an empty list.
-        const QSignalBlocker blocker( scanProcess_ );
-        scanTimeout_->stop();
-        scanProcess_->kill();
-        scanProcess_->waitForFinished( 1000 );
-    }
-    rescanPending_ = false;
-    refreshDevices();
-}
-
-void Sessions::onScanFinished( int exitCode, QProcess::ExitStatus exitStatus )
-{
-    scanTimeout_->stop();
-
-    QList<Device> found;
-    if ( exitStatus == QProcess::CrashExit ) {
-        // Killed after the timeout, which has been logged already
-    }
-    else if ( exitCode != 0 ) {
-        onScanFailed( "adb devices failed: "
-                      + QString::fromUtf8( scanProcess_->readAllStandardError() ).trimmed() );
-    }
-    else {
-        found = AdbProcess::parseDevices( scanProcess_->readAllStandardOutput() );
-        // The sidebar rescans every few seconds: only news is logged, and
-        // the devices after a failure.
-        if ( !scanned_ || found != attached_ || !scanError_.isEmpty() ) {
-            const auto ready = std::count_if( found.cbegin(), found.cend(),
-                                              []( const Device& d ) { return d.isReady(); } );
-            hostLog(
-                LOGSQUIRL_LOG_INFO,
-                QString( "Discovered %1 device(s), %2 ready." ).arg( found.size() ).arg( ready ) );
-        }
-        scanned_ = true;
-        scanError_.clear();
-    }
-
-    setDevices( found );
-    onScanEnded();
-}
-
-void Sessions::onScanFailed( const QString& message )
-{
-    // The sidebar rescans every few seconds: the same failure is logged once.
-    if ( message != scanError_ ) {
-        hostLog( LOGSQUIRL_LOG_WARNING, message );
-        scanError_ = message;
-    }
-}
-
-void Sessions::onScanEnded()
-{
-    if ( rescanPending_ ) {
-        rescanPending_ = false;
-        refreshDevices();
-    }
-    else {
-        Q_EMIT scanningChanged();
-    }
-}
-
-void Sessions::setDevices( const QList<Device>& devices )
-{
-    attached_ = devices;
-    devices_.clear();
-    for ( const auto& device : devices ) {
-        if ( device.isReady() ) {
-            devices_.append( device.serial );
-        }
-    }
-    Q_EMIT devicesChanged();
 }
 
 // ── Sessions ────────────────────────────────────────────────────────────
@@ -266,7 +109,7 @@ bool Sessions::startSession( const QString& serial, const QString& savePath )
         return false;
     }
 
-    auto* proc = new AdbProcess( serial, savePath, this );
+    auto* proc = new AdbProcess( settings_->findAdb(), serial, savePath, this );
 
     connect( proc, &AdbProcess::finished, this, [ this, serial ]( int ) {
         guarded( "ending a logcat session", [ this, &serial ] { onSessionFinished( serial ); } );
@@ -286,7 +129,7 @@ bool Sessions::startSession( const QString& serial, const QString& savePath )
     sessions_.insert( serial, proc );
 
     // Ask the host to open the log file in a follow-mode tab
-    openFollowed( proc->tempFilePath() );
+    openFollowed( proc->logFilePath() );
     hostNotify( QString( "Logcat started for %1" ).arg( serial ) );
 
     Q_EMIT sessionStarted( serial );
@@ -295,35 +138,27 @@ bool Sessions::startSession( const QString& serial, const QString& savePath )
 
 void Sessions::stopSession( const QString& serial )
 {
-    auto* proc = takeSession( serial );
+    auto* proc = sessions_.take( serial );
     if ( !proc ) {
         return;
     }
 
-    proc->stop();
-    proc->preserveTempFile();
+    proc->end();
 
     hostNotify(
         QString( "Logcat stopped for %1 (%2 lines)" ).arg( serial ).arg( proc->counters().lines ) );
 
-    proc->deleteLater();
     Q_EMIT sessionStopped( serial );
 }
 
 void Sessions::stopAll()
 {
-    // Stopped together: one after the other, adbs that do not exit would
+    // Ended together: one after the other, adbs that do not exit would
     // block the UI for two seconds each.
-    QList<AdbProcess*> stopped;
     const auto serials = sessions_.keys();
-    for ( const auto& serial : serials ) {
-        stopped.append( takeSession( serial ) );
-    }
-    AdbProcess::stopAll( stopped );
-    for ( auto* proc : stopped ) {
-        proc->preserveTempFile();
-        proc->deleteLater();
-    }
+    const auto ended = sessions_.values();
+    sessions_.clear();
+    AdbProcess::endAll( ended );
     for ( const auto& serial : serials ) {
         Q_EMIT sessionStopped( serial );
     }
@@ -342,9 +177,7 @@ void Sessions::rotateSession( const QString& serial )
         return;
     }
 
-    // The old tab keeps showing the old file, so the temporary directory
-    // must outlive this session (until LogSquirl quits, see tempdirs.h).
-    proc->preserveTempFile();
+    // The old tab keeps showing the old file: end() keeps it.
 
     // Open the new temp file in a follow-mode tab
     openFollowed( newPath );
@@ -368,12 +201,6 @@ QStringList Sessions::activeSerials() const
     return sessions_.keys();
 }
 
-qint64 Sessions::sessionLineCount( const QString& serial ) const
-{
-    const auto* proc = sessions_.value( serial, nullptr );
-    return proc ? proc->lineCount() : 0;
-}
-
 SessionCounters Sessions::counters( const QString& serial ) const
 {
     const auto* proc = sessions_.value( serial, nullptr );
@@ -383,28 +210,25 @@ SessionCounters Sessions::counters( const QString& serial ) const
 QString Sessions::filePath( const QString& serial ) const
 {
     const auto* proc = sessions_.value( serial, nullptr );
-    return proc ? proc->tempFilePath() : QString();
+    return proc ? proc->logFilePath() : QString();
 }
 
 // ── Private ─────────────────────────────────────────────────────────────
 
 void Sessions::onSessionFinished( const QString& serial )
 {
-    auto* proc = takeSession( serial );
+    auto* proc = sessions_.take( serial );
     if ( !proc ) {
         return;
     }
 
-    // Preserve the temp file so the LogSquirl tab keeps its content.
-    // When using a save path the file is already persistent.
-    proc->preserveTempFile();
-    proc->deleteLater();
+    proc->end();
 
     hostLog( LOGSQUIRL_LOG_INFO, QString( "Logcat session for %1 ended." ).arg( serial ) );
     Q_EMIT sessionStopped( serial );
 
-    // adb exits when its device goes away; find out whether it did
-    refreshDevices();
+    // adb exits when its device goes away: the scan finds out whether it did
+    Q_EMIT sessionEnded( serial );
 }
 
 void Sessions::onSessionError( const QString& serial, const QString& message )
@@ -414,29 +238,16 @@ void Sessions::onSessionError( const QString& serial, const QString& message )
     hostNotify( "Logcat error (" + serial + "): " + message );
 }
 
-AdbProcess* Sessions::takeSession( const QString& serial )
-{
-    auto* proc = sessions_.take( serial );
-    if ( proc ) {
-        // The session is over as far as Sessions is concerned.  Stopping
-        // it emits finished(), and onSessionFinished() must not act on that:
-        // it would end the session a second time, and rescan the devices
-        // once per session.
-        proc->disconnect( this );
-    }
-    return proc;
-}
-
 bool Sessions::isFileInUse( const QString& path ) const
 {
     // The file a session writes to, as start() expands a path with ~.  A
     // relative path, which start() refuses, is no session's file.
-    const auto file = AdbProcess::absoluteUserPath( path );
+    const auto file = LogFile::absoluteUserPath( path );
     if ( file.isEmpty() ) {
         return false;
     }
     for ( const auto* proc : sessions_ ) {
-        if ( isSameFile( proc->tempFilePath(), file ) ) {
+        if ( isSameFile( proc->logFilePath(), file ) ) {
             return true;
         }
     }

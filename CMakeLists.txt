@@ -38,13 +38,17 @@ qt_standard_project_setup()
 add_library(logsquirl_logcat SHARED
     src/plugin.cpp
     src/adbprocess.cpp
+    src/logfile.cpp
     src/tempdirs.cpp
     src/sessions.cpp
+    src/devicescan.cpp
     src/devicewidget.cpp
     src/sidebarwidget.cpp
+    src/deviceroster.cpp
     src/devicestore.cpp
     src/devicetile.cpp
     src/settingsdialog.cpp
+    src/settings.cpp
 )
 
 # Qt MOC needs to know about our Q_OBJECT classes

@@ -85,6 +85,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The stop notification counts the whole session's lines.** After a
   Rotate, "Logcat stopped for … (N lines)" counts every line since Start,
   instead of only those of the last file (#52).
+- **The stop line in LogSquirl's log counts the whole session's lines.**
+  After a Rotate, "Stopped logcat for device … (N lines captured)" counts
+  every line since Start, as the stop notification does, instead of only
+  those of the last file (#54).
 - **An error while the plugin handles a click, a scan or an adb no longer
   ends LogSquirl.** An exception in what the plugin does when a button or
   a tile is clicked, a device scan or an adb ends or reports an error, or

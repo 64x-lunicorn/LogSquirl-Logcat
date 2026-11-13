@@ -22,7 +22,9 @@
  * @brief BDD tests for the plugin's lifecycle through its C entry points.
  *
  * Drives logsquirl_plugin_init() / logsquirl_plugin_shutdown() against a
- * FakeHost, and clicks the menu entry the plugin registers.
+ * FakeHost, and clicks the menu entry the plugin registers.  A test whose
+ * plugin must find devices hands its device scan a runner that the test
+ * completes (fakeScan()).
  */
 
 #include <catch2/catch.hpp>
@@ -31,9 +33,11 @@
 #include <cstring>
 #include <memory>
 
+#include "devicescan.h"
 #include "devicetile.h"
 #include "devicewidget.h"
 #include "fakeadb.h"
+#include "fakeadbdevices.h"
 #include "plugin.h"
 #include "sessions.h"
 #include "sidebarwidget.h"
@@ -49,6 +53,7 @@
 #include <QWidget>
 #include <QWindow>
 
+using logcat_test::FakeAdbDevices;
 using logcat_test::FakeHost;
 using logcat_test::waitFor;
 
@@ -57,6 +62,21 @@ extern "C" int logsquirl_plugin_init_ex( const LogSquirlHostApi* api, void* hand
                                          size_t api_size );
 extern "C" void logsquirl_plugin_shutdown( void );
 extern "C" void logsquirl_plugin_configure( void* parent_widget );
+
+namespace {
+
+/**
+ * Have the next init() give its device scan a runner that the test
+ * completes, and return it: it lives until shutdown().
+ */
+FakeAdbDevices* fakeScan()
+{
+    auto* runner = new FakeAdbDevices;
+    logcat::g_state.devicesRunner = runner;
+    return runner;
+}
+
+} // namespace
 
 SCENARIO( "the Android Logcat dialog belongs to LogSquirl's window", "[plugin]" )
 {
@@ -98,17 +118,19 @@ SCENARIO( "the Android Logcat dialog belongs to LogSquirl's window", "[plugin]" 
         logsquirl_plugin_shutdown();
         REQUIRE( logcat::g_state.dialog == nullptr );
         REQUIRE( logcat::g_state.sessions == nullptr );
+        REQUIRE( logcat::g_state.scan == nullptr );
     }
 }
 
-#ifdef Q_OS_UNIX
 SCENARIO( "a new ADB path from Plugins → Configure is used right away", "[plugin]" )
 {
     GIVEN( "an initialised plugin whose device scan hangs" )
     {
         FakeHost host;
-        logcat_test::installFakeAdb( host, "exec sleep 30\n", "exec sleep 30\n" );
+        logcat_test::installBrokenAdb( host ); // only its path is used
+        auto* runner = fakeScan();
         REQUIRE( logsquirl_plugin_init( logcat::g_state.api, logcat::g_state.handle ) == 0 );
+        REQUIRE( runner->isRunning() );
 
         WHEN( "the user sets the path of a working adb in Plugins → Configure" )
         {
@@ -116,9 +138,6 @@ SCENARIO( "a new ADB path from Plugins → Configure is used right away", "[plug
             {
                 QFile file( workingAdb );
                 REQUIRE( file.open( QIODevice::WriteOnly ) );
-                file.write( "#!/bin/sh\n"
-                            "printf 'List of devices attached\\nemulator-5556\\tdevice\\n\\n'\n" );
-                file.setPermissions( file.permissions() | QFileDevice::ExeOwner );
             }
             QTimer::singleShot( 0, [ &workingAdb ]() {
                 if ( auto* dialog
@@ -129,14 +148,13 @@ SCENARIO( "a new ADB path from Plugins → Configure is used right away", "[plug
             } );
             logsquirl_plugin_configure( nullptr );
 
-            THEN( "the devices of the new adb reach the dialog and the sidebar" )
+            THEN( "the hanging scan is abandoned, and the devices of the new adb reach the "
+                  "dialog and the sidebar" )
             {
-                REQUIRE( waitFor(
-                    []() {
-                        return logcat::g_state.sessions->devices()
-                               == QStringList{ "emulator-5556" };
-                    },
-                    8000 ) );
+                REQUIRE( runner->abandoned == 1 );
+                REQUIRE( runner->adbs.last() == workingAdb );
+                runner->listOne( "emulator-5556" );
+                REQUIRE( logcat::g_state.scan->devices() == QStringList{ "emulator-5556" } );
                 const auto tiles
                     = logcat::g_state.sidebarWidget->findChildren<logcat::DeviceTile*>();
                 REQUIRE( std::any_of( tiles.cbegin(), tiles.cend(), []( const auto* tile ) {
@@ -148,7 +166,6 @@ SCENARIO( "a new ADB path from Plugins → Configure is used right away", "[plug
         logsquirl_plugin_shutdown();
     }
 }
-#endif
 
 #ifdef Q_OS_UNIX
 namespace {
@@ -362,26 +379,24 @@ SCENARIO( "temporary directories of LogSquirl processes that ended are swept", "
 #endif
 }
 
-#ifdef Q_OS_UNIX
 SCENARIO( "the sidebar remembers the devices it saw when LogSquirl restarts", "[plugin]" )
 {
     GIVEN( "an initialised plugin whose adb lists a device" )
     {
         FakeHost host;
-        logcat_test::installFakeAdb(
-            host, "exec sleep 30\n",
-            "printf 'List of devices attached\\n3A1B2C3D4E5F  device model:Pixel_8\\n\\n'\n" );
+        logcat_test::installBrokenAdb( host ); // only its path is used
+        auto* runner = fakeScan();
         REQUIRE( logsquirl_plugin_init( host.api(), &host ) == 0 );
-        REQUIRE( waitFor( []() { return !logcat::g_state.sessions->devices().isEmpty(); } ) );
+        runner->listOne( "3A1B2C3D4E5F" );
+        REQUIRE( logcat::g_state.scan->devices() == QStringList{ "3A1B2C3D4E5F" } );
 
         WHEN( "LogSquirl quits, the device is unplugged, and LogSquirl starts again" )
         {
             QMetaObject::invokeMethod( QCoreApplication::instance(), "aboutToQuit" );
             logsquirl_plugin_shutdown();
-            logcat_test::installFakeAdb( host, "exec sleep 30\n",
-                                         "printf 'List of devices attached\\n\\n'\n" );
+            runner = fakeScan();
             REQUIRE( logsquirl_plugin_init( host.api(), &host ) == 0 );
-            REQUIRE( waitFor( []() { return !logcat::g_state.sessions->isScanning(); } ) );
+            runner->list( "List of devices attached\n\n" );
 
             THEN( "the sidebar has its tile, disconnected" )
             {
@@ -390,6 +405,33 @@ SCENARIO( "the sidebar remembers the devices it saw when LogSquirl restarts", "[
                 REQUIRE( tiles.size() == 1 );
                 REQUIRE( tiles.first()->serial() == "3A1B2C3D4E5F" );
                 REQUIRE( tiles.first()->state() == logcat::TileState::Disconnected );
+            }
+        }
+
+        logsquirl_plugin_shutdown();
+    }
+}
+
+#ifdef Q_OS_UNIX
+SCENARIO( "a capture that ends on its own has the devices scanned again", "[plugin]" )
+{
+    GIVEN( "an initialised plugin whose adb exits after one line of logcat" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host, "printf 'only\\n'\n" );
+        auto* runner = fakeScan();
+        REQUIRE( logsquirl_plugin_init( host.api(), &host ) == 0 );
+        runner->listOne( "emulator-5554" );
+
+        WHEN( "a capture starts, and its adb exits, as when its device goes away" )
+        {
+            REQUIRE( logcat::g_state.sessions->startSession( "emulator-5554" ) );
+
+            THEN( "the devices are scanned again" )
+            {
+                // Waits for adb, a real process, to exit.
+                REQUIRE( waitFor( [ runner ]() { return runner->isRunning(); } ) );
+                REQUIRE( runner->adbs.size() == 2 );
             }
         }
 
@@ -424,6 +466,7 @@ SCENARIO( "the plugin registers its sidebar tab for its lifetime", "[plugin]" )
                     REQUIRE( logcat::g_state.sidebarWidget == nullptr );
                     REQUIRE( logcat::g_state.dialog == nullptr );
                     REQUIRE( logcat::g_state.sessions == nullptr );
+                    REQUIRE( logcat::g_state.scan == nullptr );
                     REQUIRE_FALSE( logcat::g_state.initialised );
                 }
             }
@@ -454,6 +497,7 @@ SCENARIO( "no exception leaves an entry point", "[plugin]" )
                 REQUIRE( logcat::g_state.sidebarWidget == nullptr );
                 REQUIRE( logcat::g_state.dialog == nullptr );
                 REQUIRE( logcat::g_state.sessions == nullptr );
+                REQUIRE( logcat::g_state.scan == nullptr );
                 REQUIRE_FALSE( host.logs.filter( "no room for another tab" ).isEmpty() );
             }
         }
@@ -479,6 +523,7 @@ SCENARIO( "no exception leaves an entry point", "[plugin]" )
                 REQUIRE( logcat::g_state.sidebarWidget == nullptr );
                 REQUIRE( logcat::g_state.dialog == nullptr );
                 REQUIRE( logcat::g_state.sessions == nullptr );
+                REQUIRE( logcat::g_state.scan == nullptr );
             }
         }
 
@@ -501,6 +546,7 @@ SCENARIO( "no exception leaves an entry point", "[plugin]" )
                 REQUIRE( logcat::g_state.sidebarWidget == nullptr );
                 REQUIRE( logcat::g_state.dialog == nullptr );
                 REQUIRE( logcat::g_state.sessions == nullptr );
+                REQUIRE( logcat::g_state.scan == nullptr );
                 REQUIRE_FALSE( logcat::g_state.initialised );
             }
         }
@@ -539,21 +585,23 @@ SCENARIO( "no exception leaves a handler that the event loop calls", "[plugin]" 
     GIVEN( "a host whose log throws on the result of a device scan" )
     {
         FakeHost host;
-        logcat_test::installFakeAdb( host );
+        logcat_test::installBrokenAdb( host ); // only its path is used
+        auto* runner = fakeScan();
         host.failLogContaining = "Discovered";
 
         WHEN( "the plugin is initialised and its first device scan ends" )
         {
             REQUIRE( logsquirl_plugin_init( host.api(), &host ) == 0 );
+            REQUIRE_NOTHROW( runner->listOne( "emulator-5554" ) );
 
             THEN( "the failure is logged through the host, and a later scan works" )
             {
-                REQUIRE( waitForLoggedFailure( host, "reading the device list" ) );
+                REQUIRE( host.logs.contains(
+                    "Logcat plugin: reading the device list failed: the log is full" ) );
                 host.failLogContaining.clear();
-                logcat::g_state.sessions->refreshDevices();
-                REQUIRE( waitFor( []() {
-                    return logcat::g_state.sessions->devices() == QStringList{ "emulator-5554" };
-                } ) );
+                logcat::g_state.scan->refresh();
+                runner->listOne( "emulator-5554" );
+                REQUIRE( logcat::g_state.scan->devices() == QStringList{ "emulator-5554" } );
             }
 
             logsquirl_plugin_shutdown();
@@ -564,8 +612,9 @@ SCENARIO( "no exception leaves a handler that the event loop calls", "[plugin]" 
     {
         FakeHost host;
         logcat_test::installFakeAdb( host, "exit 3\n" );
+        auto* runner = fakeScan();
         REQUIRE( logsquirl_plugin_init( host.api(), &host ) == 0 );
-        REQUIRE( waitFor( []() { return !logcat::g_state.sessions->devices().isEmpty(); } ) );
+        runner->listOne( "emulator-5554" );
         host.failLogContaining = "exited with code 3";
 
         WHEN( "a capture starts, and its adb exits" )
@@ -588,11 +637,12 @@ SCENARIO( "no exception leaves a handler that the event loop calls", "[plugin]" 
     {
         FakeHost host;
         logcat_test::installFakeAdb( host );
+        auto* runner = fakeScan();
         REQUIRE( logsquirl_plugin_init( host.api(), &host ) == 0 );
-        REQUIRE( waitFor( []() {
-            const auto* button = tileStartStop( "emulator-5554" );
-            return button && button->isEnabled();
-        } ) );
+        runner->listOne( "emulator-5554" );
+        const auto* button = tileStartStop( "emulator-5554" );
+        REQUIRE( button );
+        REQUIRE( button->isEnabled() );
         host.failLogContaining = "Started logcat";
 
         WHEN( "the user clicks Start on the device's tile in the sidebar" )

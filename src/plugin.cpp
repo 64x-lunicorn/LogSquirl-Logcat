@@ -37,13 +37,14 @@
  *   2. Host calls init_ex(api, handle, api_size) — or init(api, handle),
  *      which is init_ex() with the base table's size, if it is older than
  *      LogSquirl 26.11 — we store the pointers and the size, add the
- *      Plugins menu entry, create the Sessions and the DeviceWidget over
- *      them, the DeviceStore, and a SidebarWidget over both, and register
- *      the latter as a sidebar tab.
+ *      Plugins menu entry, create the Settings, the DeviceScan, the
+ *      Sessions and the DeviceWidget over them, the DeviceStore, and a
+ *      SidebarWidget over all four, and register the latter as a sidebar
+ *      tab.
  *   3. User interacts with the widgets (start, stop, settings, …).
  *   4. Host calls shutdown() — we unregister + delete the sidebar, stop all
- *      logcat sessions, delete the DeviceWidget, the Sessions and the
- *      DeviceStore, and clear state.
+ *      logcat sessions, delete the DeviceWidget, the Sessions, the
+ *      DeviceScan, the DeviceStore and the Settings, and clear state.
  *
  * No exception may leave an entry point, a host callback or a Qt signal
  * handler: the host is C, and an exception escaping into it terminates
@@ -55,10 +56,11 @@
 
 #include "plugin.h"
 
-#include "adbprocess.h"
+#include "devicescan.h"
 #include "devicestore.h"
 #include "devicewidget.h"
 #include "sessions.h"
+#include "settings.h"
 #include "sidebarwidget.h"
 #include "tempdirs.h"
 
@@ -124,7 +126,8 @@ static void showLogcatDialog( void* /* userData */ )
             return; // not initialised
         }
         if ( !logcat::g_state.dialog ) {
-            logcat::g_state.dialog = new logcat::DeviceWidget( logcat::g_state.sessions );
+            logcat::g_state.dialog = new logcat::DeviceWidget(
+                logcat::g_state.settings, logcat::g_state.scan, logcat::g_state.sessions );
         }
         auto* dialog = logcat::g_state.dialog;
 
@@ -171,9 +174,10 @@ LOGSQUIRL_PLUGIN_EXPORT const LogSquirlPluginInfo* logsquirl_plugin_get_info( vo
  *                  build: it tells which later functions the host has.
  * @return 0 on success, non-zero on failure.
  *
- * Stores the host API and handle, creates the Sessions and a DeviceWidget
- * over them, and the DeviceStore (the devices seen before and the log
- * directory), and registers a sidebar tab over the store and the Sessions.
+ * Stores the host API and handle, creates the Settings (logcat.ini: the
+ * ADB path and the log directory), the DeviceScan, the Sessions and a
+ * DeviceWidget over them, and the DeviceStore (the devices seen before),
+ * and registers a sidebar tab over all four.
  * A failure is logged and undone (shutdown()),
  * and init returns 1.
  */
@@ -203,10 +207,23 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init_ex( const LogSquirlHostApi* ap
         api->register_menu_action( handle, "Plugins", "Android Logcat\u2026", &showLogcatDialog,
                                    nullptr );
 
+        // logcat.ini: the adb to run and the log directory; none without a
+        // config directory.  First, as everything else reads it.
+        logcat::g_state.settings = new logcat::Settings( logcat::Settings::hostConfigDir() );
+
         // The devices and their sessions, which the dialog and the sidebar
-        // show.  Creating it starts the first device scan.
-        logcat::g_state.sessions = new logcat::Sessions();
-        logcat::g_state.dialog = new logcat::DeviceWidget( logcat::g_state.sessions );
+        // show.  Creating the scan starts the first device scan; a new ADB
+        // path starts it again.
+        logcat::g_state.scan = new logcat::DeviceScan(
+            logcat::g_state.settings, std::exchange( logcat::g_state.devicesRunner, nullptr ) );
+        logcat::g_state.sessions = new logcat::Sessions( logcat::g_state.settings );
+        // adb exits when its device goes away: find out whether it did.
+        QObject::connect(
+            logcat::g_state.sessions, &logcat::Sessions::sessionEnded, logcat::g_state.scan, []() {
+                guarded( "refreshing the devices", [] { logcat::g_state.scan->refresh(); } );
+            } );
+        logcat::g_state.dialog = new logcat::DeviceWidget(
+            logcat::g_state.settings, logcat::g_state.scan, logcat::g_state.sessions );
 
         // The host shuts the plugin down both when LogSquirl quits (after
         // aboutToQuit) and when the plugin is disabled or updated at runtime,
@@ -218,13 +235,14 @@ LOGSQUIRL_PLUGIN_EXPORT int logsquirl_plugin_init_ex( const LogSquirlHostApi* ap
             } );
         }
 
-        // The devices seen before, remembered in logcat.ini, and the log
-        // directory; none without a config directory.
-        logcat::g_state.store = new logcat::DeviceStore( logcat::AdbProcess::settingsFile() );
+        // The devices seen before, remembered in logcat.ini; none without a
+        // config directory.
+        logcat::g_state.store = new logcat::DeviceStore( logcat::g_state.settings->settingsFile() );
 
         // Register a sidebar tab with a tile per device
         logcat::g_state.sidebarWidget
-            = new logcat::SidebarWidget( logcat::g_state.store, logcat::g_state.sessions );
+            = new logcat::SidebarWidget( logcat::g_state.settings, logcat::g_state.store,
+                                         logcat::g_state.scan, logcat::g_state.sessions );
         api->register_sidebar_tab( handle, "Logcat",
                                    static_cast<void*>( logcat::g_state.sidebarWidget ) );
         logcat::g_state.sidebarTabRegistered = true;
@@ -290,9 +308,20 @@ LOGSQUIRL_PLUGIN_EXPORT void logsquirl_plugin_shutdown( void )
         guarded( "shutdown", [] { delete logcat::g_state.sessions; } );
         st.sessions = nullptr;
     }
+    if ( st.scan ) {
+        guarded( "shutdown", [] { delete logcat::g_state.scan; } );
+        st.scan = nullptr;
+    }
     if ( st.store ) {
         guarded( "shutdown", [] { delete logcat::g_state.store; } );
         st.store = nullptr;
+    }
+    // A runner for a scan that init() failed before creating (tests only).
+    delete std::exchange( st.devicesRunner, nullptr );
+    // Last: everything above reads it.
+    if ( st.settings ) {
+        guarded( "shutdown", [] { delete logcat::g_state.settings; } );
+        st.settings = nullptr;
     }
 
     // The tabs close with LogSquirl: remove the files of every instance of

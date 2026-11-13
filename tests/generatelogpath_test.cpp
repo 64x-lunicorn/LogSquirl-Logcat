@@ -19,7 +19,7 @@
 
 /**
  * @file generatelogpath_test.cpp
- * @brief BDD tests for AdbProcess::generateLogPath().
+ * @brief BDD tests for LogFile::generateLogPath().
  *
  * Log file names only have one-second resolution, so two captures in the
  * same second (a quick rotation, or Stop and Start) must still get
@@ -29,14 +29,14 @@
 
 #include <catch2/catch.hpp>
 
-#include "adbprocess.h"
+#include "logfile.h"
 
 #include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
 #include <QTemporaryDir>
 
-using logcat::AdbProcess;
+using logcat::LogFile;
 
 namespace {
 
@@ -57,7 +57,7 @@ SCENARIO( "generateLogPath names a new log file", "[generatelogpath]" )
     {
         WHEN( "generating a path for a device" )
         {
-            const auto path = AdbProcess::generateLogPath( dir.path(), "emulator-5554", timestamp );
+            const auto path = LogFile::generateLogPath( dir.path(), "emulator-5554", timestamp );
 
             THEN( "it is <date>_<time>_<serial>.log inside the directory" )
             {
@@ -67,8 +67,7 @@ SCENARIO( "generateLogPath names a new log file", "[generatelogpath]" )
 
         WHEN( "generating a path for a wireless device" )
         {
-            const auto path
-                = AdbProcess::generateLogPath( dir.path(), "192.168.1.5:5555", timestamp );
+            const auto path = LogFile::generateLogPath( dir.path(), "192.168.1.5:5555", timestamp );
 
             THEN( "characters that are invalid in file names are replaced" )
             {
@@ -84,7 +83,7 @@ SCENARIO( "generateLogPath names a new log file", "[generatelogpath]" )
 
         WHEN( "generating a path for the same device and second" )
         {
-            const auto path = AdbProcess::generateLogPath( dir.path(), "emulator-5554", timestamp );
+            const auto path = LogFile::generateLogPath( dir.path(), "emulator-5554", timestamp );
 
             THEN( "a numbered name that does not exist yet is returned" )
             {
@@ -99,7 +98,7 @@ SCENARIO( "generateLogPath names a new log file", "[generatelogpath]" )
 
             THEN( "the next number is used" )
             {
-                REQUIRE( AdbProcess::generateLogPath( dir.path(), "emulator-5554", timestamp )
+                REQUIRE( LogFile::generateLogPath( dir.path(), "emulator-5554", timestamp )
                          == dir.filePath( "2026-09-30_140509_emulator-5554_3.log" ) );
             }
         }

@@ -24,16 +24,15 @@
  * Each device the sidebar has seen attached, in any state, is remembered
  * with its model and its own save path, if it has one: the sidebar shows
  * a tile for it also while it is unplugged, until it is forgotten
- * (sidebarwidget.h).  The store also keeps the log directory, where a
- * device without a save path writes a new file at each Start.
+ * (sidebarwidget.h).  A device without a save path writes a new file in
+ * the log directory (settings.h) at each Start.
  *
  * SETTINGS FILE
  * ─────────────
  * logcat.ini in the plugin's configuration directory (get_config_dir), the
- * file that also holds the ADB path (adb/path, adbprocess.h):
+ * file whose other settings, the ADB path and the log directory, are
+ * Settings' (settings.h):
  *
- *   [logcat]
- *   logDir=/Users/me/logs
  *   [devices]
  *   1\serial=3A1B2C3D4E5F
  *   1\model=Pixel 8
@@ -103,21 +102,14 @@ public:
     /// device seen before.
     void setSavePath( const QString& serial, const QString& path );
 
-    /// The log directory as the user set it; empty for the default, logs/
-    /// beside the settings file.
-    QString logDir() const;
-
-    /// Set the log directory; empty for the default.
-    void setLogDir( const QString& dir );
-
     /**
      * The file a Start of the device @p serial writes to: its save path,
-     * or else a new file `<yyyy-MM-dd_HHmmss>_<serial>.log` in the log
-     * directory, which is created.  A relative log directory is left as it
-     * is (AdbProcess::start() refuses it with a message).  Empty, for a
-     * temporary file, without a settings file and a log directory.
+     * or else a new file `<yyyy-MM-dd_HHmmss>_<serial>.log` in @p logDir
+     * (Settings::logDir()), which is created.  A relative log directory is
+     * left as it is (AdbProcess::start() refuses it with a message).
+     * Empty, for a temporary file, without either.
      */
-    QString savePathFor( const QString& serial ) const;
+    QString savePathFor( const QString& serial, const QString& logDir ) const;
 
 Q_SIGNALS:
     /// A device was remembered, changed or forgotten.
