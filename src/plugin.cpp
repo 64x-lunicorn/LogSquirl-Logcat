@@ -37,9 +37,10 @@
  *   2. Host calls init_ex(api, handle, api_size) — or init(api, handle),
  *      which is init_ex() with the base table's size, if it is older than
  *      LogSquirl 26.11 — we store the pointers and the size, add the
- *      Plugins menu entry, create the Settings, the DeviceScan, the Sessions and the
- *      DeviceWidget over them, the DeviceStore, and a SidebarWidget over
- *      all three, and register the latter as a sidebar tab.
+ *      Plugins menu entry, create the Settings, the DeviceScan, the
+ *      Sessions and the DeviceWidget over them, the DeviceStore, and a
+ *      SidebarWidget over all four, and register the latter as a sidebar
+ *      tab.
  *   3. User interacts with the widgets (start, stop, settings, …).
  *   4. Host calls shutdown() — we unregister + delete the sidebar, stop all
  *      logcat sessions, delete the DeviceWidget, the Sessions, the
@@ -173,9 +174,10 @@ LOGSQUIRL_PLUGIN_EXPORT const LogSquirlPluginInfo* logsquirl_plugin_get_info( vo
  *                  build: it tells which later functions the host has.
  * @return 0 on success, non-zero on failure.
  *
- * Stores the host API and handle, creates the DeviceScan, the Sessions and
- * a DeviceWidget over them, and the DeviceStore (the devices seen before
- * and the log directory), and registers a sidebar tab over all three.
+ * Stores the host API and handle, creates the Settings (logcat.ini: the
+ * ADB path and the log directory), the DeviceScan, the Sessions and a
+ * DeviceWidget over them, and the DeviceStore (the devices seen before),
+ * and registers a sidebar tab over all four.
  * A failure is logged and undone (shutdown()),
  * and init returns 1.
  */

@@ -371,6 +371,7 @@ classDiagram
         -QComboBox* deviceCombo_
         -QPushButton* startButton_
         -QPushButton* stopButton_
+        -Settings* settings_
         -DeviceScan* scan_
         -Sessions* sessions_
         -startCapture()
@@ -381,9 +382,11 @@ classDiagram
         -QHash~QString, DeviceTile*~ tileBySerial_
         -QTimer* scanTimer_
         -QTimer* pollTimer_
+        -Settings* settings_
         -DeviceScan* scan_
         -Sessions* sessions_
         -DeviceStore* store_
+        -QHash~QString, CounterSample~ samples_
         +reload()
         +pollCounters()
     }

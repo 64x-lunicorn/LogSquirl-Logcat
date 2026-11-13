@@ -234,7 +234,8 @@ graph TD
     subgraph Plugin — C ABI Boundary
         P[plugin.cpp<br/>get_info / init /<br/>shutdown / configure]
         SW[SidebarWidget<br/>one DeviceTile per device]
-        ST[DeviceStore<br/>devices seen before + log directory]
+        ST[DeviceStore<br/>devices seen before]
+        SET[Settings<br/>logcat.ini: ADB path, log directory]
         DW[DeviceWidget<br/>dialog]
         DS[DeviceScan<br/>adb devices -l, through a port]
         S[Sessions<br/>a logcat session per device]
@@ -243,6 +244,7 @@ graph TD
     end
 
     H -- register_sidebar_tab --> P
+    P -- creates --> SET
     P -- creates --> DS
     P -- creates --> S
     P -- creates --> SW
@@ -254,6 +256,7 @@ graph TD
     DW -- view of --> DS
     DW -- view of --> S
     S -- sessionEnded: rescan --> DS
+    SET -- adbPathChanged: restart --> DS
     SW --> SB
     S -- manages --> AP1
     S -- manages --> AP2
