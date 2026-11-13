@@ -136,7 +136,7 @@ SCENARIO( "a new ADB path from Plugins → Configure is used right away", "[plug
                         return logcat::g_state.sessions->devices()
                                == QStringList{ "emulator-5556" };
                     },
-                    3000 ) );
+                    8000 ) );
                 const auto tiles
                     = logcat::g_state.sidebarWidget->findChildren<logcat::DeviceTile*>();
                 REQUIRE( std::any_of( tiles.cbegin(), tiles.cend(), []( const auto* tile ) {

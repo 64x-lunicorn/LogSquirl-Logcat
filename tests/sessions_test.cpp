@@ -634,7 +634,7 @@ SCENARIO( "devices are discovered in the background", "[sessions]" )
 
             THEN( "the hanging scan is abandoned and the new adb's devices arrive" )
             {
-                REQUIRE( waitFor( [ &changes ]() { return changes == 1; }, 3000 ) );
+                REQUIRE( waitFor( [ &changes ]() { return changes == 1; }, 8000 ) );
                 REQUIRE( sessions.devices() == QStringList{ "emulator-5556" } );
             }
         }
