@@ -148,14 +148,6 @@ private:
     /** A session reported an error. */
     void onSessionError( const QString& serial, const QString& message );
 
-    /**
-     * Remove the session for @p serial from the running sessions and cut
-     * its signals to this object.  The caller stops and deletes it.
-     *
-     * @return The session, or nullptr if there is none for @p serial.
-     */
-    AdbProcess* takeSession( const QString& serial );
-
     /** Whether a running session writes to the file at @p path. */
     bool isFileInUse( const QString& path ) const;
 

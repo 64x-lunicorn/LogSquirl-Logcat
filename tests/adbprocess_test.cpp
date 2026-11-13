@@ -34,12 +34,18 @@
 #include "plugin.h"
 #include "readonlydir.h"
 #include "scopedenv.h"
+#include "tempdirs.h"
 
+#include <QCoreApplication>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
+#include <QPointer>
 #include <QSettings>
 #include <QTemporaryDir>
+
+#include <algorithm>
 
 #ifdef Q_OS_UNIX
 #include <csignal>
@@ -416,6 +422,148 @@ SCENARIO( "the stop log line counts the lines of every file after a Rotate", "[a
                                       "captured)" )
                              .size()
                          == 1 );
+            }
+        }
+    }
+}
+#endif
+
+#ifdef Q_OS_UNIX
+SCENARIO( "end() ends a session and keeps its file for its tab", "[adbprocess]" )
+{
+    GIVEN( "a running session writing to a temporary file, with listeners" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        int signalCount = 0;
+        QPointer<AdbProcess> proc = new AdbProcess( "emulator-5554" );
+        QObject::connect( proc, &AdbProcess::finished, [ &signalCount ]( int ) { ++signalCount; } );
+        QObject::connect( proc, &AdbProcess::errorOccurred,
+                          [ &signalCount ]( const QString& ) { ++signalCount; } );
+        REQUIRE( proc->start() );
+        const auto file = proc->logFilePath();
+
+        WHEN( "it is ended, and the event loop has run" )
+        {
+            proc->end();
+            QCoreApplication::sendPostedEvents( nullptr, QEvent::DeferredDelete );
+
+            THEN( "adb is stopped, without a signal to the listeners" )
+            {
+                REQUIRE( host.logs.filter( "Stopped logcat for device emulator-5554" ).size()
+                         == 1 );
+                REQUIRE( signalCount == 0 );
+            }
+
+            THEN( "the session is deleted, and its file kept" )
+            {
+                REQUIRE( proc.isNull() );
+                REQUIRE( QFileInfo::exists( file ) );
+            }
+
+            AND_WHEN( "LogSquirl quits" )
+            {
+                logcat::removeOwnTempDirs( host.tempRoot() );
+
+                THEN( "the file is removed" )
+                {
+                    REQUIRE_FALSE( QFileInfo::exists( file ) );
+                }
+            }
+        }
+    }
+
+    GIVEN( "a session whose adb has exited on its own" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host, "printf 'only\\n'\n" );
+        QPointer<AdbProcess> proc = new AdbProcess( "emulator-5554" );
+        bool finished = false;
+        QObject::connect( proc, &AdbProcess::finished, [ &finished ]( int ) { finished = true; } );
+        REQUIRE( proc->start() );
+        const auto file = proc->logFilePath();
+        REQUIRE( waitFor( [ &finished ]() { return finished; } ) );
+
+        WHEN( "it is ended, and the event loop has run" )
+        {
+            proc->end();
+            QCoreApplication::sendPostedEvents( nullptr, QEvent::DeferredDelete );
+
+            THEN( "the session is deleted, and its file kept with what adb wrote" )
+            {
+                REQUIRE( proc.isNull() );
+                REQUIRE( readFile( file ) == "only\n" );
+            }
+        }
+    }
+
+    GIVEN( "a running session that has been rotated" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        QPointer<AdbProcess> proc = new AdbProcess( "emulator-5554" );
+        REQUIRE( proc->start() );
+        const auto first = proc->logFilePath();
+        const auto second = proc->rotateLog();
+        REQUIRE_FALSE( second.isEmpty() );
+
+        WHEN( "it is ended, and the event loop has run" )
+        {
+            proc->end();
+            QCoreApplication::sendPostedEvents( nullptr, QEvent::DeferredDelete );
+
+            THEN( "the files of both tabs are kept" )
+            {
+                REQUIRE( proc.isNull() );
+                REQUIRE( QFileInfo::exists( first ) );
+                REQUIRE( QFileInfo::exists( second ) );
+            }
+        }
+    }
+
+    GIVEN( "several sessions whose adb ignores SIGTERM" )
+    {
+        FakeHost host;
+        // sleep inherits the ignored SIGTERM, so only kill ends it.
+        logcat_test::installFakeAdb( host, "trap '' TERM\nprintf 'first\\n'\nexec sleep 30\n" );
+        constexpr int kSessions = 4;
+        QList<AdbProcess*> sessions;
+        for ( int i = 0; i < kSessions; ++i ) {
+            sessions << new AdbProcess( QString( "emulator-%1" ).arg( 5554 + 2 * i ) );
+            REQUIRE( sessions.last()->start() );
+        }
+        // Each adb has set its trap once it has written its first line.
+        REQUIRE( waitFor( [ &sessions ]() {
+            return std::all_of( sessions.cbegin(), sessions.cend(),
+                                []( const auto* proc ) { return proc->counters().lines > 0; } );
+        } ) );
+        QStringList files;
+        for ( const auto* proc : sessions ) {
+            files << proc->logFilePath();
+        }
+
+        WHEN( "they are ended together" )
+        {
+            QElapsedTimer timer;
+            timer.start();
+            AdbProcess::endAll( sessions );
+            const auto elapsedMs = timer.elapsed();
+            QCoreApplication::sendPostedEvents( nullptr, QEvent::DeferredDelete );
+
+            THEN( "they are waited for once, not one after the other" )
+            {
+                // One after the other, each would take a second before it
+                // is killed: four seconds in all.
+                REQUIRE( elapsedMs < 3000 );
+                REQUIRE( host.logs.filter( "did not exit" ).isEmpty() );
+                REQUIRE( host.logs.filter( "Stopped logcat" ).size() == kSessions );
+            }
+
+            THEN( "every file is kept" )
+            {
+                for ( const auto& file : files ) {
+                    REQUIRE( QFileInfo::exists( file ) );
+                }
             }
         }
     }

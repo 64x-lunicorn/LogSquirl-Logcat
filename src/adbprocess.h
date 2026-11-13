@@ -234,28 +234,30 @@ public:
     void stop();
 
     /**
-     * Stop the logcat processes of @p sessions together, as stop() does
-     * one: every adb is told to end before any is waited for, and all are
-     * waited for against one shared deadline, so that stopping many takes
-     * no longer than stopping one - at most two seconds.
+     * End the session, however it ends (Stop, Stop All, adb exiting on its
+     * own): its signals are cut first, so that stopping it calls back
+     * no-one; then adb is stopped as stop() does; its files are kept for
+     * their tabs (LogFile::keepTempDir(): the plugin removes the temporary
+     * ones when LogSquirl quits, tempdirs.h); and it is deleted later.
+     *
+     * Nothing but its counters() and logFilePath() may be read afterwards,
+     * and only until control returns to the event loop.
      */
-    static void stopAll( const QList<AdbProcess*>& sessions );
+    void end();
 
     /**
-     * Prevent the temporary log files from being deleted when this
-     * object is destroyed (LogFile::keepTempDir()).  Call before deleteLater() so that the
-     * LogSquirl tab can keep displaying the captured output.
-     *
-     * @return The temporary directory left on disk, or empty when the
-     *         session writes to a save path (nothing to preserve).
+     * End each of @p sessions as end() does, together: every adb is told
+     * to end before any is waited for, and all are waited for against one
+     * shared deadline, so that ending many takes no longer than ending
+     * one - at most two seconds.
      */
-    QString preserveTempFile();
+    static void endAll( const QList<AdbProcess*>& sessions );
 
     /**
      * Rotate the log file (LogFile::rotate()): close the current file and
-     * open a new one next to it.  The old file is preserved so the
-     * existing LogSquirl tab keeps its content.  New logcat output is
-     * redirected to the new file.
+     * open a new one next to it.  The old file stays on disk, and end()
+     * keeps it, so the existing LogSquirl tab keeps its content.  New
+     * logcat output is redirected to the new file.
      *
      * If the new file cannot be created, errorOccurred() is emitted and
      * the capture continues in the old file; if that cannot be reopened
@@ -321,6 +323,12 @@ private Q_SLOTS:
     void onErrorOccurred( QProcess::ProcessError error );
 
 private:
+    /**
+     * Stop the logcat processes of @p sessions together, as stop() does
+     * one, against one shared deadline (see endAll()).
+     */
+    static void stopAll( const QList<AdbProcess*>& sessions );
+
     /**
      * End the adb of every one of @p sessions: SIGTERM on Unix, kill on
      * Windows, then kill those left after a second.  Waits at most two

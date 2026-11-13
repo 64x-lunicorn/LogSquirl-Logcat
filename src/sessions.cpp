@@ -30,10 +30,12 @@
  *      follow=true, which opens a new tail-mode tab in LogSquirl.
  *   5. The session is stored in sessions_, and sessionStarted() emitted.
  *
- * stopSession():
- *   1. AdbProcess::stop() terminates the child process.
- *   2. The session is removed from sessions_, and sessionStopped() emitted.
- *   3. The LogSquirl tab remains open (the user can close it manually).
+ * stopSession(), stopAll() and adb exiting on its own:
+ *   1. The session is removed from sessions_.
+ *   2. AdbProcess::end() (or endAll()) cuts its signals, stops adb, keeps
+ *      its files for their tabs and deletes it later.
+ *   3. sessionStopped() is emitted.  The LogSquirl tab remains open (the
+ *      user can close it manually).
  */
 
 #include "sessions.h"
@@ -134,35 +136,27 @@ bool Sessions::startSession( const QString& serial, const QString& savePath )
 
 void Sessions::stopSession( const QString& serial )
 {
-    auto* proc = takeSession( serial );
+    auto* proc = sessions_.take( serial );
     if ( !proc ) {
         return;
     }
 
-    proc->stop();
-    proc->preserveTempFile();
+    proc->end();
 
     hostNotify(
         QString( "Logcat stopped for %1 (%2 lines)" ).arg( serial ).arg( proc->counters().lines ) );
 
-    proc->deleteLater();
     Q_EMIT sessionStopped( serial );
 }
 
 void Sessions::stopAll()
 {
-    // Stopped together: one after the other, adbs that do not exit would
+    // Ended together: one after the other, adbs that do not exit would
     // block the UI for two seconds each.
-    QList<AdbProcess*> stopped;
     const auto serials = sessions_.keys();
-    for ( const auto& serial : serials ) {
-        stopped.append( takeSession( serial ) );
-    }
-    AdbProcess::stopAll( stopped );
-    for ( auto* proc : stopped ) {
-        proc->preserveTempFile();
-        proc->deleteLater();
-    }
+    const auto ended = sessions_.values();
+    sessions_.clear();
+    AdbProcess::endAll( ended );
     for ( const auto& serial : serials ) {
         Q_EMIT sessionStopped( serial );
     }
@@ -181,9 +175,7 @@ void Sessions::rotateSession( const QString& serial )
         return;
     }
 
-    // The old tab keeps showing the old file, so the temporary directory
-    // must outlive this session (until LogSquirl quits, see tempdirs.h).
-    proc->preserveTempFile();
+    // The old tab keeps showing the old file: end() keeps it.
 
     // Open the new temp file in a follow-mode tab
     openFollowed( newPath );
@@ -223,15 +215,12 @@ QString Sessions::filePath( const QString& serial ) const
 
 void Sessions::onSessionFinished( const QString& serial )
 {
-    auto* proc = takeSession( serial );
+    auto* proc = sessions_.take( serial );
     if ( !proc ) {
         return;
     }
 
-    // Preserve the temp file so the LogSquirl tab keeps its content.
-    // When using a save path the file is already persistent.
-    proc->preserveTempFile();
-    proc->deleteLater();
+    proc->end();
 
     hostLog( LOGSQUIRL_LOG_INFO, QString( "Logcat session for %1 ended." ).arg( serial ) );
     Q_EMIT sessionStopped( serial );
@@ -245,19 +234,6 @@ void Sessions::onSessionError( const QString& serial, const QString& message )
     hostLog( LOGSQUIRL_LOG_ERROR, serial + ": " + message );
 
     hostNotify( "Logcat error (" + serial + "): " + message );
-}
-
-AdbProcess* Sessions::takeSession( const QString& serial )
-{
-    auto* proc = sessions_.take( serial );
-    if ( proc ) {
-        // The session is over as far as Sessions is concerned.  Stopping
-        // it emits finished(), and onSessionFinished() must not act on that:
-        // it would end the session a second time, and rescan the devices
-        // once per session.
-        proc->disconnect( this );
-    }
-    return proc;
 }
 
 bool Sessions::isFileInUse( const QString& path ) const

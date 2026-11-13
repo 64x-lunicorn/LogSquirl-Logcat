@@ -289,7 +289,7 @@ sequenceDiagram
     end
     User->>SW: Click Stop on the tile
     SW->>S: stopSession(serial)
-    S->>AP: stop() + preserveTempFile()
+    S->>AP: end(): stop, keep the file
     AP->>ADB: SIGTERM
     S-->>SW: sessionStopped(serial)
     Note over LS: Tab stays open with captured output

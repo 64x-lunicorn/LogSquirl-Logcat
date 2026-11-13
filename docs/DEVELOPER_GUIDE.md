@@ -424,7 +424,8 @@ classDiagram
         +start()
         +stop()
         +rotateLog() QString
-        +preserveTempFile()
+        +end()
+        +endAll(QList~AdbProcess*~)$
         +logFilePath() QString
         +counters() SessionCounters
         +parseDevices(QByteArray)$ QList~Device~

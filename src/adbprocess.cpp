@@ -444,9 +444,23 @@ void AdbProcess::endProcesses( const QList<AdbProcess*>& sessions )
     // and a later stop does not wait for it again.
 }
 
-QString AdbProcess::preserveTempFile()
+void AdbProcess::end()
 {
-    return logFile_.keepTempDir();
+    endAll( { this } );
+}
+
+void AdbProcess::endAll( const QList<AdbProcess*>& sessions )
+{
+    // Cut first: stopping emits finished(), and an owner that acted on it
+    // would end the session a second time.
+    for ( auto* session : sessions ) {
+        session->blockSignals( true );
+    }
+    stopAll( sessions );
+    for ( auto* session : sessions ) {
+        session->logFile_.keepTempDir();
+        session->deleteLater();
+    }
 }
 
 QString AdbProcess::rotateLog()

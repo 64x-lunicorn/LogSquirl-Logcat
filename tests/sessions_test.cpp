@@ -33,7 +33,9 @@
 #include "readonlydir.h"
 #include "scopedenv.h"
 #include "sessions.h"
+#include "tempdirs.h"
 
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
@@ -345,6 +347,110 @@ SCENARIO( "stopAll keeps temporary log files for their tabs", "[sessions]" )
             {
                 REQUIRE( QFileInfo::exists( host.openedFiles.first() ) );
                 REQUIRE( QFileInfo::exists( host.openedFiles.last() ) );
+            }
+        }
+    }
+}
+#endif
+
+#ifdef Q_OS_UNIX
+SCENARIO( "a session's files are kept for their tabs until LogSquirl quits", "[sessions]" )
+{
+    const QString serial = "emulator-5554";
+
+    // The session has ended, and the event loop has deleted it: what it
+    // left on disk is what its tabs show.
+    const auto deleteEnded
+        = []() { QCoreApplication::sendPostedEvents( nullptr, QEvent::DeferredDelete ); };
+
+    GIVEN( "a session writing to a temporary file" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host );
+        Sessions sessions;
+        REQUIRE( sessions.startSession( serial ) );
+        const auto file = sessions.filePath( serial );
+
+        WHEN( "the user stops it" )
+        {
+            sessions.stopSession( serial );
+            deleteEnded();
+
+            THEN( "its file is kept" )
+            {
+                REQUIRE( QFileInfo::exists( file ) );
+            }
+
+            AND_WHEN( "LogSquirl quits" )
+            {
+                logcat::removeOwnTempDirs( host.tempRoot() );
+
+                THEN( "its file is removed" )
+                {
+                    REQUIRE_FALSE( QFileInfo::exists( file ) );
+                }
+            }
+        }
+
+        WHEN( "the user stops all sessions" )
+        {
+            sessions.stopAll();
+            deleteEnded();
+
+            THEN( "its file is kept" )
+            {
+                REQUIRE( QFileInfo::exists( file ) );
+            }
+        }
+
+        WHEN( "it is rotated, then stopped" )
+        {
+            sessions.rotateSession( serial );
+            const auto rotated = sessions.filePath( serial );
+            REQUIRE( rotated != file );
+            sessions.stopSession( serial );
+            deleteEnded();
+
+            THEN( "the files of both tabs are kept" )
+            {
+                REQUIRE( QFileInfo::exists( file ) );
+                REQUIRE( QFileInfo::exists( rotated ) );
+            }
+
+            AND_WHEN( "LogSquirl quits" )
+            {
+                logcat::removeOwnTempDirs( host.tempRoot() );
+
+                THEN( "both files are removed" )
+                {
+                    REQUIRE_FALSE( QFileInfo::exists( file ) );
+                    REQUIRE_FALSE( QFileInfo::exists( rotated ) );
+                }
+            }
+        }
+
+        sessions.stopAll();
+    }
+
+    GIVEN( "a session whose adb exits after one line" )
+    {
+        FakeHost host;
+        logcat_test::installFakeAdb( host, "printf 'only\\n'\n" );
+        Sessions sessions;
+        const SignalLog log( sessions );
+        REQUIRE( sessions.startSession( serial ) );
+        const auto file = sessions.filePath( serial );
+
+        WHEN( "adb has exited" )
+        {
+            REQUIRE( waitFor( [ &log ]() { return !log.ended.isEmpty(); } ) );
+            deleteEnded();
+
+            THEN( "its file is kept, with what adb wrote" )
+            {
+                QFile kept( file );
+                REQUIRE( kept.open( QIODevice::ReadOnly ) );
+                REQUIRE( kept.readAll() == "only\n" );
             }
         }
     }
