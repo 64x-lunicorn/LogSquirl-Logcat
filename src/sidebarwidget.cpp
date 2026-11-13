@@ -248,7 +248,7 @@ SidebarWidget::SidebarWidget( DeviceStore* store, Sessions* sessions, QWidget* p
     // (showEvent()).
     scanTimer_->setObjectName( "deviceScan" );
     scanTimer_->setInterval( kScanIntervalMs );
-    connect( scanTimer_, &QTimer::timeout, sessions_, [ this ] {
+    connect( scanTimer_, &QTimer::timeout, this, [ this ] {
         guarded( "refreshing the devices", [ this ] { sessions_->refreshDevices(); } );
     } );
 
@@ -281,8 +281,10 @@ void SidebarWidget::showEvent( QShowEvent* event )
 void SidebarWidget::hideEvent( QHideEvent* event )
 {
     QWidget::hideEvent( event );
-    scanTimer_->stop();
-    pollTimer_->stop();
+    guarded( "hiding the Logcat tab", [ this ] {
+        scanTimer_->stop();
+        pollTimer_->stop();
+    } );
 }
 
 void SidebarWidget::onDevicesChanged()
@@ -488,11 +490,10 @@ void SidebarWidget::editSavePath( const QString& serial )
     layout->addWidget( buttons );
 
     // Each handler runs through guarded(), as the constructor's.
-    connect( buttons, &QDialogButtonBox::accepted, dialog, [ dialog ] {
-        guarded( "closing the save path dialog", [ dialog ] { dialog->accept(); } );
-    } );
+    connect( buttons, &QDialogButtonBox::accepted, dialog,
+             [ dialog ] { guarded( "saving the save path", [ dialog ] { dialog->accept(); } ); } );
     connect( buttons, &QDialogButtonBox::rejected, dialog, [ dialog ] {
-        guarded( "closing the save path dialog", [ dialog ] { dialog->reject(); } );
+        guarded( "cancelling the save path dialog", [ dialog ] { dialog->reject(); } );
     } );
     connect( browse, &QPushButton::clicked, dialog, [ dialog, edit ] {
         guarded( "choosing a save path", [ dialog, edit ] {

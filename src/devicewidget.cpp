@@ -135,7 +135,7 @@ DeviceWidget::DeviceWidget( Sessions* sessions, QWidget* parent )
     // ── Connect signals ──────────────────────────────────────────────
     // Each handler runs through guarded(): an exception must not unwind
     // through Qt's event loop into the host.
-    connect( refreshButton_, &QPushButton::clicked, sessions_, [ this ]() {
+    connect( refreshButton_, &QPushButton::clicked, this, [ this ]() {
         guarded( "refreshing the devices", [ this ] { sessions_->refreshDevices(); } );
     } );
     connect( startButton_, &QPushButton::clicked, this,

@@ -243,32 +243,35 @@ void DeviceTile::setState( TileState state )
 void DeviceTile::changeEvent( QEvent* event )
 {
     QFrame::changeEvent( event );
-    switch ( event->type() ) {
-    case QEvent::ParentChange:
-        // Its stylesheet keeps a palette change of the parent from reaching
-        // the tile: it watches the parent itself.
-        if ( watched_ ) {
-            watched_->removeEventFilter( this );
+    // The event loop calls it: it runs through guarded(), as the handlers.
+    guarded( "styling a device tile", [ this, event ] {
+        switch ( event->type() ) {
+        case QEvent::ParentChange:
+            // Its stylesheet keeps a palette change of the parent from
+            // reaching the tile: it watches the parent itself.
+            if ( watched_ ) {
+                watched_->removeEventFilter( this );
+            }
+            watched_ = parentWidget();
+            if ( watched_ ) {
+                watched_->installEventFilter( this );
+            }
+            applyStyle();
+            break;
+        case QEvent::PaletteChange:
+        case QEvent::ApplicationPaletteChange:
+            applyStyle();
+            break;
+        default:
+            break;
         }
-        watched_ = parentWidget();
-        if ( watched_ ) {
-            watched_->installEventFilter( this );
-        }
-        applyStyle();
-        break;
-    case QEvent::PaletteChange:
-    case QEvent::ApplicationPaletteChange:
-        applyStyle();
-        break;
-    default:
-        break;
-    }
+    } );
 }
 
 bool DeviceTile::eventFilter( QObject* watched, QEvent* event )
 {
     if ( watched == watched_ && event->type() == QEvent::PaletteChange ) {
-        applyStyle();
+        guarded( "styling a device tile", [ this ] { applyStyle(); } );
     }
     return QFrame::eventFilter( watched, event );
 }
